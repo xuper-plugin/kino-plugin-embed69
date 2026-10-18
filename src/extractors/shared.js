@@ -32,9 +32,25 @@ export function miss(kino, server, reason) {
   return null;
 }
 
-/** Fetches the embed page; null (the status logged) when the host answers an error. */
+/**
+ * What an extractor answers when the host says the file is gone (deleted or expired): not a failure to retry or wait for, so
+ * the caller can skip the rest of that language and say why when nothing else is left. Never a stream: it has no `url`.
+ */
+export const GONE = Object.freeze({ gone: true });
+
+/** The text a host's player page shows for a file it no longer has ("File is no longer available as it expired or has been deleted"). */
+const GONE_TEXT = /no longer available|has been deleted|expired or has been deleted|file (was )?not found|video (was )?not found/i;
+
+/** Whether this embed page is the host's "gone" page: its visible text (scripts and styles left out) says so. */
+export function isGone(html) {
+  const visible = String(html || "").replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
+  return GONE_TEXT.test(visible);
+}
+
+/** Fetches the embed page; GONE when the host answers 404 or 410, null (the status logged) for any other error. */
 export async function pageText(req, url, headers, kino, server) {
   const r = await req(url, { headers });
+  if (r.status === 404 || r.status === 410) { miss(kino, server || "embed", "gone, status " + r.status); return GONE; }
   return r.ok ? r.text() : miss(kino, server || "embed", "status " + r.status);
 }
 

@@ -18,7 +18,7 @@ En Kino: **Plugins ▸ Agregar un plugin ▸ Kino**, y pega la dirección de est
 - **Copias por idioma y servidor.** El sitio ofrece cada título en latino, castellano y subtitulado, en hasta tres servidores. El
   primero que abre se reproduce y los demás quedan en el menú **Servidor** (hasta ocho), sin abrirlos de antemano.
 - **Idioma preferido** (ajuste): latino (por defecto), castellano o subtitulado; los otros dos van después. Dentro de cada idioma,
-  primero StreamWish, luego VidHide y al final Voe.
+  primero StreamWish, luego Voe y al final VidHide (el más lento desde un teléfono).
 - **Subtítulos y duración** que el propio reproductor del servidor revela, cuando los trae.
 - **Descargas** sin conexión en el teléfono.
 - Textos en español e inglés.
@@ -27,7 +27,11 @@ En Kino: **Plugins ▸ Agregar un plugin ▸ Kino**, y pega la dirección de est
 
 - **Voe** sirve el video desde un dominio que cambia y pide "confirma que eres humano" a una petición normal, por eso solo abre
   con el navegador oculto de Kino (el manifest pide `browser`; se muestra en rojo al instalar). Sin él, esa copia no abre.
-- **VidHide** responde lento a veces: si no contesta a tiempo, se salta.
+- **VidHide** responde lento a veces (a 8 s de espera en un teléfono): por eso va al final de cada idioma, y si no contesta a tiempo se salta.
+- **Enlaces caducados:** el sitio conserva títulos cuyos archivos ya borraron los servidores (sobre todo estrenos recientes). Cuando
+  un servidor dice "File is no longer available" o responde 404, esa copia se da por muerta, se saltan las demás copias de ese idioma
+  (suben y se borran juntas) y, si no queda nada, el mensaje dice que los enlaces caducaron o se borraron, en vez de "no se
+  encontraron fuentes". Un servidor que solo falla o tarda no cuenta como muerto: no se salta el idioma.
 - Kino muestra en rojo que el plugin "puede reproducir video desde cualquier servidor": los reproductores sirven desde CDN que
   cambian (`streamHosts: "any"`).
 - Que haya o no un título depende del sitio, no del plugin.

@@ -10,6 +10,7 @@
 
 import { listCopies } from "./embed69.js";
 import { extractorFor } from "./extractors/index.js";
+import { GONE } from "./extractors/shared.js";
 import { makeReq, UA } from "./util/http.js";
 
 // kino.meta and kino.tmdb exist from Kino 0.9.53; the guards are here for the SDK validator.
@@ -28,6 +29,7 @@ const STRINGS = {
   es: {
     unavailable: "El servicio no está disponible en este momento.",
     noStreams: "No se encontraron fuentes para este título.",
+    gone: "Los enlaces de este título caducaron o se borraron.",
     noMeta: "No se encontró información de este título.",
     trendingMovies: "Películas populares",
     trendingSeries: "Series populares",
@@ -52,6 +54,7 @@ const STRINGS = {
   en: {
     unavailable: "The service is not available right now.",
     noStreams: "No streams found for this title.",
+    gone: "This title's links expired or were deleted.",
     noMeta: "No metadata found for this title.",
     trendingMovies: "Trending movies",
     trendingSeries: "Trending series",
@@ -281,8 +284,11 @@ export async function episodes(ref) {
 // ---- resolve ----
 
 const SERVER_LABEL = { streamwish: "StreamWish", vidhide: "VidHide", voe: "Voe" };
-/** Fastest first: Voe goes through the hidden browser (several seconds), the others through one request. */
-const SERVER_ORDER = ["streamwish", "vidhide", "voe"];
+/**
+ * Fastest first: StreamWish is one request; Voe goes through the hidden browser (a few seconds); VidHide is last because its
+ * host answered slowest, timing out at 8 s on a phone (measured on a Redmi).
+ */
+const SERVER_ORDER = ["streamwish", "voe", "vidhide"];
 
 /** The languages in the order the person prefers them (the "language" setting), the other two after it. */
 function languageOrder() {
@@ -324,12 +330,13 @@ function toStream(s, c) {
   return out;
 }
 
-/** One copy opened: the stream, or null when its player shows none (or fails). */
+/** One copy opened: the stream, GONE when the host no longer has the file, or null when its player shows none (or fails). */
 async function open(c, req) {
   const ex = extractorFor(c.embedUrl);
   if (!ex) return null;
   try {
     const s = await ex.extract(c.embedUrl, req, kino);
+    if (s && s.gone) return GONE;
     return s && typeof s.url === "string" && s.url ? toStream(s, c) : null;
   } catch (e) {
     kino.log("[embed69]", c.server, (e && e.code) || "extract_failed");
@@ -361,6 +368,7 @@ export async function resolve(ref) {
     if (!want) throw kino.error("not_found", "bad copy ref");
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
     const stream = copy ? await open(copy, req) : null;
+    if (stream === GONE) throw kino.error("not_found", "copy gone: " + want.lang + "/" + want.server, { userMessage: t("gone") });
     if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
     return stream;
   }
@@ -369,18 +377,29 @@ export async function resolve(ref) {
   const copies = ordered(await listCopies(title, { kino, req }));
   if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t("noStreams") });
 
-  // The first copy that opens plays; the rest are lazy copies, opened only if the person (or the fallback) reaches them
+  // The first copy that opens plays; the rest are lazy copies, opened only if the person (or the fallback) reaches them. A host that
+  // says a file is gone has deleted the whole upload of that language, so its other copies are not tried (a dead copy costs
+  // half a second, a slow one eight) and are not offered either.
   let main = null;
   let tried = 0;
+  const goneLangs = new Set();
+  let timedOut = false;
   for (const c of copies) {
+    if (goneLangs.has(c.lang)) continue;
     tried++;
-    main = await open(c, req);
-    if (main) { main.copy = c; break; }
+    const r = await open(c, req);
+    if (r === GONE) { goneLangs.add(c.lang); continue; }
+    if (r) { main = r; break; }
+    timedOut = true;
   }
-  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
-  const { copy, ...stream } = main;
-  const alternatives = copies.slice(tried).slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
-  return { ...stream, ...(alternatives.length ? { alternatives } : {}) };
+  if (!main) {
+    // Every language tried said "gone" and nothing merely failed: the title's links have expired, not this plugin or the network
+    const everyOneGone = goneLangs.size > 0 && !timedOut;
+    throw kino.error("not_found", (everyOneGone ? "links gone for " : "no copy opened for ") + title.imdbId, { userMessage: t(everyOneGone ? "gone" : "noStreams") });
+  }
+  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1).filter((c) => !goneLangs.has(c.lang));
+  const alternatives = rest.slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
+  return { ...main, ...(alternatives.length ? { alternatives } : {}) };
 }
 
 // ---- settings actions ----

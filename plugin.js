@@ -68,8 +68,18 @@ function miss(kino2, server, reason) {
   if (kino2 && typeof kino2.log === "function") kino2.log("[embed69]", server, reason);
   return null;
 }
+var GONE = Object.freeze({ gone: true });
+var GONE_TEXT = /no longer available|has been deleted|expired or has been deleted|file (was )?not found|video (was )?not found/i;
+function isGone(html) {
+  const visible = String(html || "").replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
+  return GONE_TEXT.test(visible);
+}
 async function pageText(req, url, headers, kino2, server) {
   const r = await req(url, { headers });
+  if (r.status === 404 || r.status === 410) {
+    miss(kino2, server || "embed", "gone, status " + r.status);
+    return GONE;
+  }
   return r.ok ? r.text() : miss(kino2, server || "embed", "status " + r.status);
 }
 var LANG_CODES = [
@@ -127,9 +137,10 @@ async function extract(embedUrl, req, kino2) {
   if (u.hostname === "hglink.to") u.hostname = "vibuxer.com";
   const referer = u.origin + "/";
   const html = await pageText(req, u.href, { Referer: referer }, kino2, "streamwish");
+  if (html === GONE) return GONE;
   if (html == null) return null;
   const url = findIn(html, (t2) => hlsKey(t2, ["hls4", "hls2", "hls3"], u.origin) || fileM3u8(t2, u.origin));
-  if (!url) return miss(kino2, "streamwish", "no playlist in page");
+  if (!url) return isGone(html) ? (miss(kino2, "streamwish", "gone: the file was deleted or expired"), GONE) : miss(kino2, "streamwish", "no playlist in page");
   return { url, mime: HLS_MIME, headers: { "User-Agent": UA, Referer: referer }, ...pageExtras(html, u.origin) };
 }
 
@@ -143,9 +154,10 @@ var HOSTS2 = ["vidhide.com", "vidhidepro.com", "vidhideplus.com", "dintezuvio.co
 async function extract2(embedUrl, req, kino2) {
   const u = new URL(embedUrl);
   const html = await pageText(req, embedUrl, { Referer: u.origin + "/" }, kino2, "vidhide");
+  if (html === GONE) return GONE;
   if (html == null) return null;
   const url = findIn(html, (t2) => hlsKey(t2, ["hls4", "hls2"], u.origin) || fileM3u8(t2, u.origin));
-  if (!url) return miss(kino2, "vidhide", "no playlist in page");
+  if (!url) return isGone(html) ? (miss(kino2, "vidhide", "gone: the file was deleted or expired"), GONE) : miss(kino2, "vidhide", "no playlist in page");
   return { url, mime: HLS_MIME, headers: { Referer: u.origin + "/", Origin: u.origin }, ...pageExtras(html, u.origin) };
 }
 
@@ -201,6 +213,10 @@ async function extract3(embedUrl, req, kino2) {
     if (kino2) kino2.log("[embed69]", "voe", ...a);
   };
   const first = await req(embedUrl, { headers: { Referer: embedUrl } });
+  if (first.status === 404 || first.status === 410) {
+    log("gone, embed", first.status);
+    return GONE;
+  }
   if (!first.ok) {
     log("embed", first.status);
     return null;
@@ -331,6 +347,7 @@ var STRINGS = {
   es: {
     unavailable: "El servicio no est\xE1 disponible en este momento.",
     noStreams: "No se encontraron fuentes para este t\xEDtulo.",
+    gone: "Los enlaces de este t\xEDtulo caducaron o se borraron.",
     noMeta: "No se encontr\xF3 informaci\xF3n de este t\xEDtulo.",
     trendingMovies: "Pel\xEDculas populares",
     trendingSeries: "Series populares",
@@ -355,6 +372,7 @@ var STRINGS = {
   en: {
     unavailable: "The service is not available right now.",
     noStreams: "No streams found for this title.",
+    gone: "This title's links expired or were deleted.",
     noMeta: "No metadata found for this title.",
     trendingMovies: "Trending movies",
     trendingSeries: "Trending series",
@@ -554,7 +572,7 @@ async function episodes(ref) {
   };
 }
 var SERVER_LABEL = { streamwish: "StreamWish", vidhide: "VidHide", voe: "Voe" };
-var SERVER_ORDER = ["streamwish", "vidhide", "voe"];
+var SERVER_ORDER = ["streamwish", "voe", "vidhide"];
 function languageOrder() {
   const pref = String(kino.config.get("language") || "lat");
   return pref === "esp" ? ["esp", "lat", "sub"] : pref === "sub" ? ["sub", "lat", "esp"] : ["lat", "esp", "sub"];
@@ -587,6 +605,7 @@ async function open(c, req) {
   if (!ex) return null;
   try {
     const s = await ex.extract(c.embedUrl, req, kino);
+    if (s && s.gone) return GONE;
     return s && typeof s.url === "string" && s.url ? toStream(s, c) : null;
   } catch (e) {
     kino.log("[embed69]", c.server, e && e.code || "extract_failed");
@@ -611,28 +630,40 @@ async function resolve(ref) {
   if (ref.startsWith("cp:")) {
     const want = parseCopyRef(ref);
     if (!want) throw kino.error("not_found", "bad copy ref");
-    const copy2 = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
-    const stream2 = copy2 ? await open(copy2, req) : null;
-    if (!stream2) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
-    return stream2;
+    const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
+    const stream = copy ? await open(copy, req) : null;
+    if (stream === GONE) throw kino.error("not_found", "copy gone: " + want.lang + "/" + want.server, { userMessage: t("gone") });
+    if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
+    return stream;
   }
   const title = await titleOf(ref);
   const copies = ordered(await listCopies(title, { kino, req }));
   if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t("noStreams") });
   let main = null;
   let tried = 0;
+  const goneLangs = /* @__PURE__ */ new Set();
+  let timedOut = false;
   for (const c of copies) {
+    if (goneLangs.has(c.lang)) continue;
     tried++;
-    main = await open(c, req);
-    if (main) {
-      main.copy = c;
+    const r = await open(c, req);
+    if (r === GONE) {
+      goneLangs.add(c.lang);
+      continue;
+    }
+    if (r) {
+      main = r;
       break;
     }
+    timedOut = true;
   }
-  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
-  const { copy, ...stream } = main;
-  const alternatives = copies.slice(tried).slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
-  return { ...stream, ...alternatives.length ? { alternatives } : {} };
+  if (!main) {
+    const everyOneGone = goneLangs.size > 0 && !timedOut;
+    throw kino.error("not_found", (everyOneGone ? "links gone for " : "no copy opened for ") + title.imdbId, { userMessage: t(everyOneGone ? "gone" : "noStreams") });
+  }
+  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1).filter((c) => !goneLangs.has(c.lang));
+  const alternatives = rest.slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
+  return { ...main, ...alternatives.length ? { alternatives } : {} };
 }
 async function action(key) {
   if (key === "clearCache") {

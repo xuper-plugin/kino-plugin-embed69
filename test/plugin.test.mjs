@@ -110,9 +110,9 @@ test("the other copies are lazy refs, preferred language first, faster servers f
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
   const a = await plugin.resolve("m:603");
-  assert.deepEqual(a.alternatives.map((x) => x.label), ["Latino · VidHide", "Latino · Voe", "Castellano · StreamWish", "Subtitulado · StreamWish"]);
+  assert.deepEqual(a.alternatives.map((x) => x.label), ["Latino · Voe", "Latino · VidHide", "Castellano · StreamWish", "Subtitulado · StreamWish"]);
   assert.deepEqual(a.alternatives.map((x) => x.ref), [
-    "cp:movie:tt0133093:lat:vidhide", "cp:movie:tt0133093:lat:voe", "cp:movie:tt0133093:esp:streamwish", "cp:movie:tt0133093:sub:streamwish"]);
+    "cp:movie:tt0133093:lat:voe", "cp:movie:tt0133093:lat:vidhide", "cp:movie:tt0133093:esp:streamwish", "cp:movie:tt0133093:sub:streamwish"]);
   assert.ok(a.alternatives.every((x) => x.ref.length <= 512 && !x.url));
   assert.ok(!calls.some((c) => c.url.includes("morencius.com")), "a lazy copy is not opened up front");
 });
@@ -167,7 +167,7 @@ test("an episode asks /f/<imdb>-<s>x<ee> and its lazy refs name season and episo
   serve("tt0903747-2x05", ALL);
   const a = await plugin.resolve("ep:tt0903747:2:5");
   assert.equal(calls[0].url, "https://embed69.org/f/tt0903747-2x05");
-  assert.equal(a.alternatives[0].ref, "cp:ep:tt0903747:2:5:lat:vidhide");
+  assert.equal(a.alternatives[0].ref, "cp:ep:tt0903747:2:5:lat:voe");
   const lazy = await plugin.resolve("cp:ep:tt0903747:2:5:esp:streamwish");
   assert.equal(lazy.url, "https://vibuxer.com/stream/esp/master.m3u8");
 });
@@ -195,6 +195,63 @@ test("links on hosts no extractor knows are left out, and so is the site's downl
   const a = await plugin.resolve("m:603");
   assert.equal(a.label, "Latino · StreamWish");
   assert.equal(a.alternatives, undefined);
+});
+
+
+// ---- links the host no longer has ----
+
+const GONE_PAGE = { body: "<html><body><div>File is no longer available as it expired or has been deleted.</div><script>var player = 'file not found in a script is not text';</script></body></html>" };
+
+test("a language whose StreamWish file is gone is skipped whole (its other servers are not even asked) and the next language plays", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": GONE_PAGE });
+  const a = await plugin.resolve("m:603");
+  assert.equal(a.label, "Castellano · StreamWish");
+  assert.ok(!calls.some((c) => c.url.includes("morencius.com") || c.url.includes("voe.sx")), "VidHide and Voe of the dead language were not asked");
+  assert.deepEqual(a.alternatives.map((x) => x.label), ["Subtitulado · StreamWish"], "and are not offered");
+});
+
+test("when every language is gone the person reads why, and nothing slow was asked", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": GONE_PAGE, "https://vibuxer.com/e/swesp": GONE_PAGE, "https://vibuxer.com/e/swsub": GONE_PAGE });
+  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found" && e.userMessage === "Los enlaces de este título caducaron o se borraron.");
+  assert.ok(!calls.some((c) => c.url.includes("morencius.com")));
+});
+
+test("a host that answers 404 for the embed is a file that is gone, for StreamWish, VidHide and Voe alike", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", [["LAT", [["voe", VOE("voelat")]]]], { "https://voe.sx/e/voelat": { status: 404, body: "" } });
+  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "Los enlaces de este título caducaron o se borraron.");
+  serve("tt0133093", [["LAT", [["vidhide", VH("vhlat")]]]], { "https://morencius.com/embed/vhlat": { status: 410, body: "" } });
+  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "Los enlaces de este título caducaron o se borraron.");
+});
+
+test("a slow or failing host is not 'gone': the person reads the generic message, and the other copies were still tried", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", [["LAT", [["streamwish", SW("swlat")], ["vidhide", VH("vhlat")]]]], {
+    "https://vibuxer.com/e/swlat": () => { throw Object.assign(new Error("timeout"), { code: "timeout" }); },
+    "https://morencius.com/embed/vhlat": { status: 500, body: "" },
+  });
+  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "No se encontraron fuentes para este título.");
+  assert.ok(calls.some((c) => c.url.includes("morencius.com")), "a failure is not a reason to skip the language");
+});
+
+test("a page that merely mentions a deleted file in a script is not a gone page", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": { body: `<script>var note = "file not found";</script>{"hls4":"https://vibuxer.com/stream/lat/master.m3u8"}` } });
+  assert.equal((await plugin.resolve("m:603")).label, "Latino · StreamWish");
+});
+
+test("a lazy copy whose file is gone says why", async () => {
+  serve("tt0133093", ALL, { "https://vibuxer.com/e/swesp": GONE_PAGE });
+  await assert.rejects(() => plugin.resolve("cp:movie:tt0133093:esp:streamwish"), (e) => e.code === "not_found" && e.userMessage === "Los enlaces de este título caducaron o se borraron.");
+});
+
+test("the message is in English too", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", [["LAT", [["streamwish", SW("swlat")]]]], { "https://vibuxer.com/e/swlat": GONE_PAGE });
+  globalThis.kino.lang = "en";
+  try { await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "This title's links expired or were deleted."); } finally { globalThis.kino.lang = "es"; }
 });
 
 // ---- categories ----

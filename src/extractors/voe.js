@@ -1,4 +1,4 @@
-import { HLS_MIME } from "./shared.js";
+import { HLS_MIME, GONE } from "./shared.js";
 
 export const HOSTS = ["voe.sx"];
 const JUNK = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
@@ -50,6 +50,7 @@ async function capture(embedUrl, req, kino) {
 export async function extract(embedUrl, req, kino) {
   const log = (...a) => { if (kino) kino.log("[embed69]", "voe", ...a); };
   const first = await req(embedUrl, { headers: { Referer: embedUrl } });
+  if (first.status === 404 || first.status === 410) { log("gone, embed", first.status); return GONE; }
   if (!first.ok) { log("embed", first.status); return null; }
   const html = first.text();
   if (redirectOf(html)) {
