@@ -1,0 +1,95 @@
+{
+  "id": "embed69",
+  "name": "Embed 69",
+  "version": "1.0.0",
+  "apiVersion": 9,
+  "entry": "plugin.js",
+  "icon": "icon.png",
+  "description": "Películas y series en latino, castellano o subtituladas, a través de Embed 69.",
+  "author": "xuper-plugin",
+  "homepage": "https://github.com/xuper-plugin/kino-plugin-embed69",
+  "hosts": [
+    "embed69.org",
+    "vidhide.com",
+    "vidhidepro.com",
+    "vidhideplus.com",
+    "dintezuvio.com",
+    "minochinos.com",
+    "filelions.to",
+    "morencius.com",
+    "hlswish.com",
+    "streamwish.com",
+    "streamwish.to",
+    "strwish.com",
+    "wishembed.com",
+    "filelions.com",
+    "hglink.to",
+    "vibuxer.com",
+    "voe.sx"
+  ],
+  "streamHosts": "any",
+  "browser": true,
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "episodes",
+    "resolve",
+    "download"
+  ],
+  "categories": [
+    "movies",
+    "series"
+  ],
+  "color": "#6A1B9A",
+  "theme": {
+    "accent": "#BA68C8",
+    "onAccent": "#12081A",
+    "background": "#0C0812",
+    "surface": "#1A1224",
+    "highlight": "#CE93D8"
+  },
+  "telemetry": true,
+  "settings": [
+    {
+      "key": "language",
+      "label": "Idioma preferido",
+      "labelEn": "Preferred language",
+      "type": "select",
+      "default": "lat",
+      "options": [
+        {
+          "value": "lat",
+          "label": "Latino",
+          "labelEn": "Latin American"
+        },
+        {
+          "value": "esp",
+          "label": "Castellano",
+          "labelEn": "Castilian"
+        },
+        {
+          "value": "sub",
+          "label": "Subtitulado",
+          "labelEn": "Subtitled"
+        }
+      ]
+    },
+    {
+      "key": "cacheSection",
+      "label": "Caché",
+      "labelEn": "Cache",
+      "type": "section",
+      "hint": "Los IDs de IMDB se guardan para no pedirlos de nuevo.",
+      "hintEn": "IMDB ids are kept so they are not asked again."
+    },
+    {
+      "key": "clearCache",
+      "label": "Vaciar caché",
+      "labelEn": "Clear cache",
+      "type": "action",
+      "confirm": "¿Vaciar la caché de IDs?",
+      "confirmEn": "Clear the ID cache?"
+    }
+  ]
+}

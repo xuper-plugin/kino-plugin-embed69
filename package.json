@@ -1,0 +1,11 @@
+{
+  "name": "kino-plugin-embed69",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/plugin.js --bundle --format=esm --target=es2020 --outfile=plugin.js",
+    "test": "node --test test/*.test.mjs",
+    "validate": "npm run build && node sdk/validate.mjs ."
+  },
+  "devDependencies": { "esbuild": "^0.21.0" }
+}

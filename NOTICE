@@ -1,0 +1,3 @@
+Kino plugin "Embed69". Site behaviour (URLs, request shapes, decode steps) documented from
+KennethJYS/Nuvio-Providers-Latino; no code copied from it. The extractors, the proof-of-work solver and the unpacker are
+adapted from the Kino plugin "Latino" (xuper-plugin/kino-plugin-latino, Apache-2.0), by the same author.
