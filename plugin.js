@@ -19,7 +19,7 @@ function makeReq(kino2, { deadline }) {
   const req = async (url, opts = {}) => {
     const left = deadline - Date.now();
     if (left < MIN_MS) throw kino2.error("timeout", "no time left for " + new URL(url).hostname);
-    return kino2.fetch(url, { headers: opts.headers, method: opts.method, body: opts.body, timeoutMs: Math.min(REQUEST_MS, left) });
+    return kino2.fetch(url, { headers: { "User-Agent": UA, ...opts.headers || {} }, method: opts.method, body: opts.body, timeoutMs: Math.min(REQUEST_MS, left) });
   };
   req.left = () => Math.max(0, deadline - Date.now());
   return req;

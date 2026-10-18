@@ -97,6 +97,15 @@ test("a movie asks /f/<imdb> with the partner's Referer and plays the first copy
   assert.equal(a.headers.Referer, "https://vibuxer.com/");
 });
 
+test("every request carries a browser User-Agent (the players answer okhttp's with a page that has no playlist), beside the source's own headers", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL);
+  await plugin.resolve("m:603");
+  assert.ok(calls.length >= 2);
+  for (const c of calls) assert.match(c.opts.headers["User-Agent"], /^Mozilla\/5\.0 .*Chrome/, c.url);
+  assert.equal(calls[0].opts.headers.Referer, "https://sololatino.net/");
+});
+
 test("the other copies are lazy refs, preferred language first, faster servers first", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
