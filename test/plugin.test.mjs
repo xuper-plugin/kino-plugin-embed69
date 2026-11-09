@@ -15,6 +15,7 @@ let pages = {};          // url -> { status?, body } (a function answers per req
 let logs = [];
 globalThis.kino = {
   lang: "es",
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   config: { get: (k) => config[k] },
   fetch: async (url, opts = {}) => {
     calls.push({ url, opts });

@@ -13,6 +13,9 @@ import { extractorFor } from "./extractors/index.js";
 import { GONE } from "./extractors/shared.js";
 import { makeReq, UA } from "./util/http.js";
 
+// Kino waits for every request a call left running before it delivers the call's answer; ask it to drop them once the call settles.
+globalThis.__kinoDropPendingFetches = true;
+
 // kino.meta and kino.tmdb exist from Kino 0.9.53; the guards are here for the SDK validator.
 if (typeof kino.meta !== "function") throw kino.error("unavailable", "kino.meta not available");
 if (typeof kino.tmdb !== "function") throw kino.error("unavailable", "kino.tmdb not available");
@@ -166,10 +169,17 @@ async function homeRow(row) {
   return items.length ? { id: row.id, title: t(row.title), genre: row.genre, ref: row.ref, items } : null;
 }
 
+/** Kino cuts a Home at 20 s: the rows still loading by then are left off and the ones that loaded are shown. */
+const HOME_BUDGET_MS = 14000;
+
 export async function home() {
   // Every row on its own: one that fails or comes back empty is left out, the rest of the Home is still shown.
-  const settled = await Promise.allSettled(HOME_ROWS.map(homeRow));
-  const rows = settled.map((r) => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
+  const out = HOME_ROWS.map(() => null);
+  let done = false;
+  const all = Promise.all(HOME_ROWS.map((row, i) => homeRow(row).then((r) => { out[i] = r; }, () => {}))).then(() => { done = true; });
+  const end = Date.now() + HOME_BUDGET_MS;
+  while (!done && Date.now() < end) await Promise.race([all, kino.sleep(Math.min(250, Math.max(1, end - Date.now())))]);
+  const rows = out.filter(Boolean);
   if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t("unavailable") });
   return rows;
 }
