@@ -39,6 +39,40 @@ export function pathFor(title) {
   return `${title.imdbId}-${s}x${String(e).padStart(2, "0")}`;
 }
 
+const PAGE_MIN_MS = 4000;   // less than this left: a hidden-browser read cannot finish
+const PAGE_MAX_MS = 22000;  // Anubis' check takes a few seconds on a phone; kino.browser.page allows up to 25 s
+const PAGE_TTL_MS = 10 * 60 * 1000;
+const pageCache = new Map(); // url -> { at, html }: each hidden read opens a fresh page, so a title's lazy copies reuse the first
+
+const isCheckPage = (html) => /anubis_challenge|anubis-main/i.test(html);
+
+/**
+ * The site's page for a title as HTML, or null. Tries a plain request first; when the site answers its Anubis check page (it
+ * wants a browser's script to run) the hidden browser (`kino.browser.page`, manifest `"browser": "pages"`) loads it, waits for
+ * the real page (the one with the proof of work) and returns that. Without a browser, or when it is blocked, null: no copies.
+ */
+async function readPage(url, { kino, req }) {
+  const hit = pageCache.get(url);
+  if (hit && Date.now() - hit.at < PAGE_TTL_MS) return hit.html;
+  let r = null;
+  try { r = await req(url, { headers: HEADERS }); } catch (_) { /* a failed plain request still has the browser */ }
+  let html = r && r.ok ? r.text() : null;
+  if (html && !isCheckPage(html)) return html; // the plain request is cheap: only the hidden-browser read is cached
+  if (!(kino.browser && typeof kino.browser.page === "function")) return null;
+  const ms = Math.min(PAGE_MAX_MS, req.left() - 2500);
+  if (ms < PAGE_MIN_MS) return null;
+  try {
+    const p = await kino.browser.page(url, { waitFor: "POW_CHALLENGE", timeoutMs: ms });
+    html = p && typeof p.html === "string" ? p.html : null;
+  } catch (e) {
+    if (kino.log) kino.log("embed69: browser.page " + (e && e.code ? e.code : "failed") + " for " + url);
+    return null;
+  }
+  if (!html || isCheckPage(html) && !/POW_CHALLENGE/.test(html)) return null;
+  pageCache.set(url, { at: Date.now(), html });
+  return html;
+}
+
 /**
  * The copies of a title that this plugin can open: `{ lang: "lat"|"esp"|"sub", server, embedUrl }` for every link on a host an
  * extractor knows. Empty when the site has nothing, answers an error, or its page is not the shape this reads.
@@ -46,9 +80,8 @@ export function pathFor(title) {
 export async function listCopies(title, { kino, req }) {
   const path = pathFor(title);
   if (!path) return [];
-  const r = await req(`${SITE}/f/${path}`, { headers: HEADERS });
-  if (!r.ok) return [];
-  const html = r.text();
+  const html = await readPage(`${SITE}/f/${path}`, { kino, req });
+  if (!html) return [];
   const data = /let\s+dataLink\s*=\s*(\[.+\]);/.exec(html);
   const challenge = quoted(html, "POW_CHALLENGE"), salt = quoted(html, "POW_SALT");
   const difficulty = Number((/POW_DIFFICULTY\s*=\s*(\d+)/.exec(html) || [])[1]);

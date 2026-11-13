@@ -32,6 +32,9 @@ En Kino: **Plugins ▸ Agregar un plugin ▸ Kino**, y pega la dirección de est
   un servidor dice "File is no longer available" o responde 404, esa copia se da por muerta, se saltan las demás copias de ese idioma
   (suben y se borran juntas) y, si no queda nada, el mensaje dice que los enlaces caducaron o se borraron, en vez de "no se
   encontraron fuentes". Un servidor que solo falla o tarda no cuenta como muerto: no se salta el idioma.
+- **Comprobación Anubis:** embed69.org ahora pone delante su filtro anti-bots (Anubis), que un `fetch` normal no pasa. Cuando lo ve, el plugin
+  carga la página con el navegador oculto de Kino (`kino.browser.page`, el manifest pide `"browser": "pages"`) y espera a la página real. Sin ese
+  navegador, o si el sitio no lo deja pasar, el título sale sin fuentes.
 - Kino muestra en rojo que el plugin "puede reproducir video desde cualquier servidor": los reproductores sirven desde CDN que
   cambian (`streamHosts: "any"`).
 - Que haya o no un título depende del sitio, no del plugin.

@@ -81,7 +81,7 @@ test("the manifest is valid for Kino and declares the site and every player's ho
   const out = validateManifest(readFileSync(new URL("../kino-plugin.json", import.meta.url), "utf8"));
   assert.ok(!out.errors?.length, JSON.stringify(out.errors));
   for (const h of ["embed69.org", "hglink.to", "vibuxer.com", "morencius.com", "voe.sx"]) assert.ok(manifest.hosts.includes(h), h);
-  assert.equal(manifest.browser, true);
+  assert.equal(manifest.browser, "pages"); // page(): the site's Anubis check needs a real browser
   assert.ok(manifest.capabilities.includes("download"));
 });
 
@@ -360,3 +360,51 @@ const HOME_PATHS = {
   "g-action": "/discover/movie", "g-comedy": "/discover/movie", "g-scifi": "/discover/movie", "g-horror": "/discover/movie",
   "g-drama": "/discover/movie", kids: "/discover/movie", docs: "/discover/movie", anime: "/discover/tv",
 };
+
+// ---- the site's Anubis check page: only a browser gets past it ----
+
+const ANUBIS = `<html><script id="anubis_challenge" type="application/json">{"rules":{"algorithm":"fast","difficulty":4}}</script><div id="anubis-main"></div></html>`;
+
+test("when the site answers its Anubis check page, the hidden browser reads the real page and the copies open", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0111161" } });
+  serve("tt0111161", ALL);
+  const real = pages["https://embed69.org/f/tt0111161"].body;
+  pages["https://embed69.org/f/tt0111161"] = { body: ANUBIS };
+  const asked = [];
+  kino.browser = { captureAll: true, capture: async () => { throw kino.error("browser_unavailable", "x"); },
+    page: async (url, o) => { asked.push({ url, o }); return { html: real, finalUrl: url, status: 200, truncated: false }; } };
+  try {
+    const a = await plugin.resolve("m:604");
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].url, "https://embed69.org/f/tt0111161");
+    assert.equal(asked[0].o.waitFor, "POW_CHALLENGE");
+    assert.ok(asked[0].o.timeoutMs >= 1000 && asked[0].o.timeoutMs <= 25000);
+    assert.equal(a.url, "https://vibuxer.com/stream/lat/master.m3u8");
+  } finally { delete kino.browser; }
+});
+
+test("a lazy copy reuses the page the hidden browser already read (one browser read per title, not one per copy)", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0068646" } });
+  serve("tt0068646", ALL);
+  const real = pages["https://embed69.org/f/tt0068646"].body;
+  pages["https://embed69.org/f/tt0068646"] = { body: ANUBIS };
+  let reads = 0;
+  kino.browser = { captureAll: true, capture: async () => null, page: async (url) => { reads++; return { html: real, finalUrl: url, status: 200 }; } };
+  try {
+    const a = await plugin.resolve("m:605");
+    const lazy = a.alternatives.find((x) => x.ref.startsWith("cp:") && !x.ref.endsWith(":voe"));
+    assert.ok(lazy);
+    const b = await plugin.resolve(lazy.ref);
+    assert.ok(b.url);
+    assert.equal(reads, 1);
+  } finally { delete kino.browser; }
+});
+
+test("Anubis with no browser (older Kino), or a browser that is blocked, says there are no sources instead of crashing", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0050083" } });
+  serve("tt0050083", ALL);
+  pages["https://embed69.org/f/tt0050083"] = { body: ANUBIS };
+  await assert.rejects(() => plugin.resolve("m:606"), (e) => e.code === "not_found");
+  kino.browser = { captureAll: true, capture: async () => null, page: async () => { throw kino.error("blocked", "check never passed"); } };
+  try { await assert.rejects(() => plugin.resolve("m:606"), (e) => e.code === "not_found"); } finally { delete kino.browser; }
+});

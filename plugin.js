@@ -297,12 +297,40 @@ function pathFor(title) {
   if (title.season == null || title.episode == null || !Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < 1) return null;
   return `${title.imdbId}-${s}x${String(e).padStart(2, "0")}`;
 }
+var PAGE_MIN_MS = 4e3;
+var PAGE_MAX_MS = 22e3;
+var PAGE_TTL_MS = 10 * 60 * 1e3;
+var pageCache = /* @__PURE__ */ new Map();
+var isCheckPage = (html) => /anubis_challenge|anubis-main/i.test(html);
+async function readPage(url, { kino: kino2, req }) {
+  const hit = pageCache.get(url);
+  if (hit && Date.now() - hit.at < PAGE_TTL_MS) return hit.html;
+  let r = null;
+  try {
+    r = await req(url, { headers: HEADERS });
+  } catch (_) {
+  }
+  let html = r && r.ok ? r.text() : null;
+  if (html && !isCheckPage(html)) return html;
+  if (!(kino2.browser && typeof kino2.browser.page === "function")) return null;
+  const ms = Math.min(PAGE_MAX_MS, req.left() - 2500);
+  if (ms < PAGE_MIN_MS) return null;
+  try {
+    const p = await kino2.browser.page(url, { waitFor: "POW_CHALLENGE", timeoutMs: ms });
+    html = p && typeof p.html === "string" ? p.html : null;
+  } catch (e) {
+    if (kino2.log) kino2.log("embed69: browser.page " + (e && e.code ? e.code : "failed") + " for " + url);
+    return null;
+  }
+  if (!html || isCheckPage(html) && !/POW_CHALLENGE/.test(html)) return null;
+  pageCache.set(url, { at: Date.now(), html });
+  return html;
+}
 async function listCopies(title, { kino: kino2, req }) {
   const path = pathFor(title);
   if (!path) return [];
-  const r = await req(`${SITE}/f/${path}`, { headers: HEADERS });
-  if (!r.ok) return [];
-  const html = r.text();
+  const html = await readPage(`${SITE}/f/${path}`, { kino: kino2, req });
+  if (!html) return [];
   const data = /let\s+dataLink\s*=\s*(\[.+\]);/.exec(html);
   const challenge = quoted(html, "POW_CHALLENGE"), salt = quoted(html, "POW_SALT");
   const difficulty = Number((/POW_DIFFICULTY\s*=\s*(\d+)/.exec(html) || [])[1]);

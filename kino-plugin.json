@@ -1,7 +1,7 @@
 {
   "id": "embed69",
   "name": "Embed 69",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -28,7 +28,7 @@
     "voe.sx"
   ],
   "streamHosts": "any",
-  "browser": true,
+  "browser": "pages",
   "capabilities": [
     "search",
     "home",
