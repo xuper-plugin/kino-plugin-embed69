@@ -1,7 +1,7 @@
 {
   "id": "embed69",
   "name": "Embed 69",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -27,6 +27,7 @@
     "vibuxer.com",
     "voe.sx"
   ],
+  "discoverable": false,
   "streamHosts": "any",
   "browser": "pages",
   "capabilities": [
