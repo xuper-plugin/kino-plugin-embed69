@@ -10,6 +10,7 @@
 
 import { listCopies, SITE } from "./embed69.js";
 import { makeReq, UA } from "./util/http.js";
+import { makeBrowse } from "./browse/index.js";
 
 // Kino waits for every request a call left running before it delivers the call's answer; ask it to drop them once the call settles.
 globalThis.__kinoDropPendingFetches = true;
@@ -416,28 +417,28 @@ function installGateView(device) {
   };
 }
 
-/** Once the resolver is installed: a short landing that points to Home/search, with the donate button under it. */
-function readyView(device) {
-  return { type: "Scaffold", key: "embed69-ready",
-    body: { type: "SingleChildScrollView", key: "readyScroll", children: [
-      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
-        { type: "Text", text: "Todo listo", textEn: "All set", style: "h3" },
-        { type: "Text", color: "secondary", text: "Explora Embed69 desde el inicio de Kino o busca un título.", textEn: "Browse Embed69 from Kino's home, or search for a title." },
-        supportNode(device),
-      ] },
-    ] },
-  };
-}
+/** The rich browse screen (modelled on Latino's): one "inicio" tab of Home's rows, search and detail pages, built
+ *  from this plugin's own home()/search(). It draws from what it holds and fills as the sources answer. */
+let browseInstance = null;
+const browseScreen = () => (browseInstance ??= makeBrowse({
+  kino,
+  loadTab: async () => ({ rows: await home() }),
+  searchTitles: (q) => search({ q }),
+}));
 
-/** `screen(ctx)`: the install gate while the resolver is missing, a short landing once it is there. */
+/** `screen(ctx)`: the install gate while the resolver is missing, the rich browse screen once it is there. */
 export async function screen(ctx) {
   await null;
   const c = ctx && typeof ctx === "object" ? ctx : {};
-  return c.installed && c.installed[RESOLVER_REPO] ? readyView(c.device) : installGateView(c.device);
+  if (!(c.installed && c.installed[RESOLVER_REPO])) return installGateView(c.device);
+  return browseScreen().view(c);
 }
 
-/** `screenEvent(ev)`: the gate is static, so there are no events to handle. */
-export async function screenEvent() { await null; return {}; }
+/** `screenEvent(ev)`: the browse screen's events (tab load, search, detail navigation). */
+export async function screenEvent(ev) {
+  await null;
+  return browseScreen().event(ev && typeof ev === "object" ? ev : {});
+}
 
 export async function resolve(ref) {
   if (!(await resolverInstalled())) throw kino.error("unavailable", "resolver missing", { userMessage: t("needResolver") });

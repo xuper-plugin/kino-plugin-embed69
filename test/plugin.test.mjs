@@ -181,12 +181,21 @@ test("a gate host the resolver opens nothing for is captured in the hidden brows
   } finally { delete globalThis.kino.browser; }
 });
 
-test("the screen is the install gate until the resolver is installed, then a landing, with the donate button under install", async () => {
+test("the screen is the install gate until the resolver is installed, then the rich browse screen", async () => {
   const gate = JSON.stringify(await plugin.screen({ device: "phone", installed: {} }));
   assert.match(gate, /Instalar Kino Resolver/);
   assert.match(gate, /installPlugin/);
   assert.match(gate, /"key":"donate"/);
-  assert.match(JSON.stringify(await plugin.screen({ device: "phone", installed: { "xuper-plugin/kino-plugin-kino-resolver": true } })), /Todo listo|All set/);
+  const browse = JSON.stringify(await plugin.screen({ device: "phone", installed: { "xuper-plugin/kino-plugin-kino-resolver": true } }));
+  assert.match(browse, /[Ss]caffold/);
+  assert.ok(!/Instalar Kino Resolver/.test(browse), "installed -> the browse screen, not the gate");
+});
+
+test("screenEvent drives the browse screen without throwing", async () => {
+  tmdbImpl = async () => ({ results: [{ id: 1, title: "A", poster_path: "/a.jpg" }], page: 1, total_pages: 1 });
+  await plugin.screenEvent({ event: "tab", arg: "inicio" }); // a tab change: must not throw
+  await plugin.screenEvent({ event: "search", arg: "naruto" });
+  assert.ok(true);
 });
 
 test("an episode asks /f/<imdb>-<s>x<ee> and its lazy refs name season and episode", async () => {
