@@ -2,11 +2,10 @@
 // will replace them, so nothing jumps when the rows arrive. Every text is in both languages.
 import { both } from "../i18n.js";
 import { TAB_IDS } from "./model.js";
-import { detailView, openArgs, cardRow, cardGrid } from "./detail.js";
+import { detailView, cardRow } from "./detail.js";
 
 const TAB_KEYS = { inicio: "tabHome", peliculas: "tabMovies", series: "tabSeries" };
 const POLL_MS = 1_500;
-const SEARCH_CAP = 60;
 
 /** `key` in both languages as a node's twin texts: `{ [field]: Spanish, [field + "En"]: English }`. */
 export const twin = (key, field = "text", vars) => {
@@ -23,14 +22,6 @@ const railSkeleton = (n) => ({
     { type: "Skeleton", shape: "line", width: 120 },
     { type: "Row", gap: 12, sizes: ["compact"], children: [1, 2, 3].map((i) => ({ type: "Skeleton", shape: "card", key: `sk${n}c${i}`, flex: 1 })) },
     { type: "Row", gap: 12, sizes: ["medium", "expanded"], children: [1, 2, 3, 4, 5, 6].map((i) => ({ type: "Skeleton", shape: "card", key: `sk${n}w${i}`, flex: 1 })) },
-  ],
-});
-
-/** The skeleton of a results grid: two rows of poster cards. */
-const gridSkeleton = () => ({
-  type: "Column", key: "gridSkeleton", gap: 12, children: [
-    ...[1, 2].map((r) => ({ type: "Row", gap: 12, sizes: ["compact"], key: `gc${r}`, children: [1, 2, 3].map((i) => ({ type: "Skeleton", shape: "card", key: `gc${r}-${i}`, flex: 1 })) })),
-    ...[1, 2].map((r) => ({ type: "Row", gap: 12, sizes: ["medium", "expanded"], key: `gw${r}`, children: [1, 2, 3, 4, 5, 6].map((i) => ({ type: "Skeleton", shape: "card", key: `gw${r}-${i}`, flex: 1 })) })),
   ],
 });
 
@@ -66,7 +57,7 @@ const rail = (r, key, titleOverride) => ({
  * `data`: `{ slides, rails }` of the active tab, or null while it is not in. `recent`: the cards of the played titles.
  * `pending`: some tab is still being fetched (the timer polls only then). `failed`: the active tab could not load.
  */
-export function browseView({ tab, data, recent, pending, failed, device = "phone" }) {
+export function browseView({ tab, data, recent, pending, failed, searching = false, device = "phone" }) {
   const tv = device === "tv";
   const gear = { type: "IconButton", key: "settingsButton", icon: "settings", ...twin("brSettings", "labelText"), ...twin("brSettings", "tooltip"), onPressed: { event: "go", arg: "settings" } };
   const active = TAB_IDS.includes(tab) ? tab : TAB_IDS[0];
@@ -84,24 +75,26 @@ export function browseView({ tab, data, recent, pending, failed, device = "phone
   }
   const isBanner = (n) => !!n && (n.type === "heroCard" || n.key === "heroSkeleton" || (n.type === "PageView" && String(n.key).startsWith("hero")));
   const banner = body.length > 0 && isBanner(body[0]) ? body.shift() : null; // the main picture goes edge to edge, right under the bar
+  // The bar is either the normal one (logo, and the tabs beside it on a TV) or, once the search button is pressed, a box in the bar
+  // whose words go to Kino's own search of this plugin; the back button where Close was closes the box and brings the bar back.
+  const appBar = searching
+    ? {
+        type: "AppBar", mergeWithKinoBar: true, dense: true, divider: false,
+        leading: { type: "IconButton", key: "searchBack", icon: "arrow_back", ...twin("brBack", "labelText"), ...twin("brBack", "tooltip"), onPressed: "closeSearch" },
+        title: { type: "TextField", key: "q", kind: "search", autofocus: true, ...twin("brSearchHint", "hintText"), maxLength: 100, onSubmitted: "search", trailingIcon: "search", ...twin("brSearch", "trailingLabel"), onTrailingTap: "search" },
+      }
+    : {
+        type: "AppBar", mergeWithKinoBar: true, dense: true, divider: false,
+        leading: { type: "IconButton", key: "close", icon: "close", ...twin("brClose", "labelText"), ...twin("brClose", "tooltip"), onPressed: { go: { close: true } } },
+        // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
+        actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin("brSearch", "labelText"), ...twin("brSearch", "tooltip"), onPressed: "openSearch" }, gear] : [gear],
+        // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
+        title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo(),
+      };
   return {
     type: "Scaffold",
-    appBar: {
-      type: "AppBar",
-      // One bar instead of two (Kino 0.9.81+; an older Kino draws its own bar above and this one under it): the close button where
-      // Kino's was and the plugin's logo where its name was (its name when the logo cannot be drawn), with no line under it.
-      mergeWithKinoBar: true,
-      dense: true,
-      divider: false,
-      leading: { type: "IconButton", key: "close", icon: "close", ...twin("brClose", "labelText"), ...twin("brClose", "tooltip"), onPressed: { go: { close: true } } },
-      // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
-      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin("brSearch", "labelText"), ...twin("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } }, gear] : [gear],
-      title: tv
-        // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
-        ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] }
-        : logo(),
-    },
-    ...(tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } } }),
+    appBar,
+    ...(tv || searching ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin("brSearch", "tooltip"), onPressed: "openSearch" } }),
     // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
       // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).
@@ -125,49 +118,6 @@ export function settingsView() {
       title: logo(),
     },
     body: { type: "SingleChildScrollView", key: "settings-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: [{ type: "settings", key: "form" }] }] },
-  };
-}
-
-/**
- * The search page (route "search"): the box with the words, then skeletons while the sources answer, then the results as
- * Kino's grid; empty, it paints what earlier searches found. `status`: "idle", "loading", "done" or "fail".
- */
-export function searchView({ query, status, items, history = [], device = "phone" }) {
-  const tv = device === "tv";
-  // On a TV the box and its button live in the bar (field on the left, button on the right) and the bar carries no title: the
-  // screen is known by what it does. Elsewhere the box sits at the top of the page under a "Buscar" title.
-  const searchForm = () => ({
-    type: "Form", key: "searchForm", onSubmitted: "search", gap: 8, children: tv
-      ? [{ type: "Row", key: "searchRow", gap: 16, crossAxisAlignment: "center", children: [
-        { type: "TextField", key: "q", kind: "text", value: query, ...twin("brSearchHint", "labelText"), maxLength: 100, autofocus: true, weight: 1 },
-        { type: "ElevatedButton", key: "searchGo", ...twin("brSearch", "labelText"), icon: "search", submit: true },
-      ] }]
-      : [
-        { type: "TextField", key: "q", kind: "text", value: query, ...twin("brSearchHint", "labelText"), maxLength: 100, autofocus: true },
-        { type: "ElevatedButton", key: "searchGo", ...twin("brSearch", "labelText"), icon: "search", submit: true },
-      ],
-  });
-  const body = tv ? [] : [searchForm()];
-  if (status === "fail") {
-    body.push({ type: "MaterialBanner", key: "searchFailed", role: "error", ...twin("brSearchFailed"), action: { ...twin("brRetry", "label"), onTap: "sretry" } });
-  } else if (status === "done" && items) {
-    if (items.length === 0) body.push({ type: "Text", ...twin("brNoResults", "text"), color: "muted" });
-    else body.push(cardGrid(items.slice(0, SEARCH_CAP), "results"));
-  } else if (status !== "idle") {
-    body.push(gridSkeleton());
-  } else if (history.length > 0) {
-    body.push({ type: "Text", ...twin("brSearchedBefore", "text"), style: "h4" });
-    body.push(cardGrid(history.slice(0, SEARCH_CAP), "history"));
-  }
-  return {
-    type: "Scaffold",
-    appBar: {
-      type: "AppBar", mergeWithKinoBar: true, dense: true, divider: false,
-      leading: { type: "IconButton", key: "back", icon: "arrow_back", ...twin("brBack", "labelText"), ...twin("brBack", "tooltip"), onPressed: "back" },
-      ...(tv ? { title: searchForm() } : twin("brSearchTitle", "title")),
-    },
-    body: { type: "SingleChildScrollView", key: "search-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] },
-    ...(status === "loading" ? { every: { ms: 1_000, event: "stick" } } : {}),
   };
 }
 

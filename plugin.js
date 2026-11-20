@@ -573,7 +573,6 @@ var cardNode = (card, size, scope) => ({
   ...opensPage(card) ? { onTap: { go: { title: { ref: card.ref, kind: card.kind, id: card.id, title: card.title } } } } : {}
 });
 var cardRow = (items, key, size) => ({ type: "SingleChildScrollView", key: key + "-s", direction: "horizontal", children: [{ type: "Row", key: key + "-r", gap: 12, children: items.map((c) => cardNode(c, size, key)) }] });
-var cardGrid = (items, key) => ({ type: "GridView", key, columns: { compact: 3, expanded: 6 }, children: items.map((c) => cardNode(c, "medium", key)) });
 function pushOf(arg) {
   let a = null;
   try {
@@ -783,7 +782,6 @@ function detailView({ r, entry, season, logo: logo2, back }) {
 // src/browse/view.js
 var TAB_KEYS = { inicio: "tabHome", peliculas: "tabMovies", series: "tabSeries" };
 var POLL_MS = 1500;
-var SEARCH_CAP = 60;
 var twin2 = (key, field = "text", vars) => {
   const w = both(key, vars);
   return { [field]: w.es, [field + "En"]: w.en };
@@ -798,15 +796,6 @@ var railSkeleton2 = (n) => ({
     { type: "Skeleton", shape: "line", width: 120 },
     { type: "Row", gap: 12, sizes: ["compact"], children: [1, 2, 3].map((i) => ({ type: "Skeleton", shape: "card", key: `sk${n}c${i}`, flex: 1 })) },
     { type: "Row", gap: 12, sizes: ["medium", "expanded"], children: [1, 2, 3, 4, 5, 6].map((i) => ({ type: "Skeleton", shape: "card", key: `sk${n}w${i}`, flex: 1 })) }
-  ]
-});
-var gridSkeleton = () => ({
-  type: "Column",
-  key: "gridSkeleton",
-  gap: 12,
-  children: [
-    ...[1, 2].map((r) => ({ type: "Row", gap: 12, sizes: ["compact"], key: `gc${r}`, children: [1, 2, 3].map((i) => ({ type: "Skeleton", shape: "card", key: `gc${r}-${i}`, flex: 1 })) })),
-    ...[1, 2].map((r) => ({ type: "Row", gap: 12, sizes: ["medium", "expanded"], key: `gw${r}`, children: [1, 2, 3, 4, 5, 6].map((i) => ({ type: "Skeleton", shape: "card", key: `gw${r}-${i}`, flex: 1 })) }))
   ]
 });
 var heroSkeleton2 = () => ({ type: "Skeleton", key: "heroSkeleton", shape: "block", height: { compact: 200, expanded: 320 } });
@@ -852,7 +841,7 @@ var rail = (r, key, titleOverride) => ({
     cardRow(r.items, key, "medium")
   ]
 });
-function browseView({ tab, data, recent, pending, failed, device = "phone" }) {
+function browseView({ tab, data, recent, pending, failed, searching = false, device = "phone" }) {
   const tv = device === "tv";
   const gear = { type: "IconButton", key: "settingsButton", icon: "settings", ...twin2("brSettings", "labelText"), ...twin2("brSettings", "tooltip"), onPressed: { event: "go", arg: "settings" } };
   const active = TAB_IDS.includes(tab) ? tab : TAB_IDS[0];
@@ -875,21 +864,28 @@ function browseView({ tab, data, recent, pending, failed, device = "phone" }) {
   }
   const isBanner = (n) => !!n && (n.type === "heroCard" || n.key === "heroSkeleton" || n.type === "PageView" && String(n.key).startsWith("hero"));
   const banner = body.length > 0 && isBanner(body[0]) ? body.shift() : null;
+  const appBar = searching ? {
+    type: "AppBar",
+    mergeWithKinoBar: true,
+    dense: true,
+    divider: false,
+    leading: { type: "IconButton", key: "searchBack", icon: "arrow_back", ...twin2("brBack", "labelText"), ...twin2("brBack", "tooltip"), onPressed: "closeSearch" },
+    title: { type: "TextField", key: "q", kind: "search", autofocus: true, ...twin2("brSearchHint", "hintText"), maxLength: 100, onSubmitted: "search", trailingIcon: "search", ...twin2("brSearch", "trailingLabel"), onTrailingTap: "search" }
+  } : {
+    type: "AppBar",
+    mergeWithKinoBar: true,
+    dense: true,
+    divider: false,
+    leading: { type: "IconButton", key: "close", icon: "close", ...twin2("brClose", "labelText"), ...twin2("brClose", "tooltip"), onPressed: { go: { close: true } } },
+    // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
+    actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: "openSearch" }, gear] : [gear],
+    // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
+    title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo()
+  };
   return {
     type: "Scaffold",
-    appBar: {
-      type: "AppBar",
-      // One bar instead of two (Kino 0.9.81+; an older Kino draws its own bar above and this one under it): the close button where
-      // Kino's was and the plugin's logo where its name was (its name when the logo cannot be drawn), with no line under it.
-      mergeWithKinoBar: true,
-      dense: true,
-      divider: false,
-      leading: { type: "IconButton", key: "close", icon: "close", ...twin2("brClose", "labelText"), ...twin2("brClose", "tooltip"), onPressed: { go: { close: true } } },
-      // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
-      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } }, gear] : [gear],
-      title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo()
-    },
-    ...tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin2("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } } },
+    appBar,
+    ...tv || searching ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin2("brSearch", "tooltip"), onPressed: "openSearch" } },
     // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
       // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).
@@ -911,47 +907,6 @@ function settingsView() {
       title: logo()
     },
     body: { type: "SingleChildScrollView", key: "settings-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: [{ type: "settings", key: "form" }] }] }
-  };
-}
-function searchView({ query, status, items, history = [], device = "phone" }) {
-  const tv = device === "tv";
-  const searchForm = () => ({
-    type: "Form",
-    key: "searchForm",
-    onSubmitted: "search",
-    gap: 8,
-    children: tv ? [{ type: "Row", key: "searchRow", gap: 16, crossAxisAlignment: "center", children: [
-      { type: "TextField", key: "q", kind: "text", value: query, ...twin2("brSearchHint", "labelText"), maxLength: 100, autofocus: true, weight: 1 },
-      { type: "ElevatedButton", key: "searchGo", ...twin2("brSearch", "labelText"), icon: "search", submit: true }
-    ] }] : [
-      { type: "TextField", key: "q", kind: "text", value: query, ...twin2("brSearchHint", "labelText"), maxLength: 100, autofocus: true },
-      { type: "ElevatedButton", key: "searchGo", ...twin2("brSearch", "labelText"), icon: "search", submit: true }
-    ]
-  });
-  const body = tv ? [] : [searchForm()];
-  if (status === "fail") {
-    body.push({ type: "MaterialBanner", key: "searchFailed", role: "error", ...twin2("brSearchFailed"), action: { ...twin2("brRetry", "label"), onTap: "sretry" } });
-  } else if (status === "done" && items) {
-    if (items.length === 0) body.push({ type: "Text", ...twin2("brNoResults", "text"), color: "muted" });
-    else body.push(cardGrid(items.slice(0, SEARCH_CAP), "results"));
-  } else if (status !== "idle") {
-    body.push(gridSkeleton());
-  } else if (history.length > 0) {
-    body.push({ type: "Text", ...twin2("brSearchedBefore", "text"), style: "h4" });
-    body.push(cardGrid(history.slice(0, SEARCH_CAP), "history"));
-  }
-  return {
-    type: "Scaffold",
-    appBar: {
-      type: "AppBar",
-      mergeWithKinoBar: true,
-      dense: true,
-      divider: false,
-      leading: { type: "IconButton", key: "back", icon: "arrow_back", ...twin2("brBack", "labelText"), ...twin2("brBack", "tooltip"), onPressed: "back" },
-      ...tv ? { title: searchForm() } : twin2("brSearchTitle", "title")
-    },
-    body: { type: "SingleChildScrollView", key: "search-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] },
-    ...status === "loading" ? { every: { ms: 1e3, event: "stick" } } : {}
   };
 }
 function detailPage({ r, entry, season }) {
@@ -1034,9 +989,7 @@ var HOME_KEY = "home1";
 var SNAP_MAX = 20 * 1024;
 var RECENT_KEY = "recent1";
 var RECENT_MAX = 12;
-var HIST_KEY = "searchHist1";
-var HIST_MAX = 24;
-function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
+function makeBrowse({ kino: kino2, loadTab }) {
   const meta = makeMetaCache({ kino: kino2 });
   const enrich = (data) => data ? {
     slides: data.slides.map((s) => {
@@ -1075,8 +1028,8 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
   }
   function writeSnap(tab, data) {
     for (let per = 10; per >= 3; per -= 2) {
-      const slim2 = { slides: data.slides, rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
-      const text = JSON.stringify({ at: Date.now(), data: slim2 });
+      const slim = { slides: data.slides, rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
+      const text = JSON.stringify({ at: Date.now(), data: slim });
       if (text.length <= SNAP_MAX) {
         set(SNAP_PREFIX + tab, text, { ttlMs: SNAP_TTL_MS });
         return;
@@ -1124,24 +1077,6 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
     } catch (_) {
     }
   }
-  const slim = (c) => ({ id: c.id, ref: c.ref, title: c.title, kind: c.kind, ...c.poster ? { poster: c.poster } : {} });
-  function readHistory() {
-    try {
-      const a = JSON.parse(get(HIST_KEY) || "[]");
-      return Array.isArray(a) ? a.filter((c) => c && typeof c.id === "string" && typeof c.ref === "string" && typeof c.title === "string").slice(0, HIST_MAX) : [];
-    } catch (_) {
-      return [];
-    }
-  }
-  function rememberFound(cards) {
-    try {
-      const fresh = cards.filter((c) => c.adult !== true).slice(0, 12).map(slim);
-      const ids = new Set(fresh.map((c) => c.id));
-      set(HIST_KEY, JSON.stringify([...fresh, ...readHistory().filter((c) => !ids.has(c.id))].slice(0, HIST_MAX)));
-    } catch (_) {
-    }
-  }
-  let found = null;
   const details = /* @__PURE__ */ new Map();
   const paramsOf = (route) => route && route.params && typeof route.params === "object" ? route.params : {};
   const tabFromArgs = (route) => {
@@ -1161,17 +1096,11 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
         return detailPage({ r: { ref: p.open, id: p.i, kind: p.k === "movie" ? "movie" : "series", title: typeof p.t === "string" ? p.t : "" }, entry: details.get(p.open) || null, season: Number(st.season) || 0 });
       }
     }
-    if (ctx.route && ctx.route.name === "search") {
-      const query = typeof st.sq === "string" ? st.sq : "";
-      const items = found && found.q === query ? found.items : null;
-      const status = query === "" ? "idle" : st.sstate === "fail" ? "fail" : items ? "done" : "loading";
-      return searchView({ query, status, items, history: query === "" ? readHistory() : [], device: ctx.device });
-    }
     const tab = TAB_IDS.includes(st.tab) ? st.tab : tabFromArgs(ctx.route) ?? stored() ?? TAB_IDS[0];
     const data = enrich(dataOf(tab));
     const loaded = TAB_IDS.map((t3) => memo.get(t3)).filter(Boolean).map((m) => m.data);
     const pending = Array.isArray(st.pending) && st.pending.length > 0;
-    return browseView({ tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), device: ctx.device });
+    return browseView({ tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), searching: !!st.searching, device: ctx.device });
   }
   async function load(tab) {
     const page = await loadTab(tab);
@@ -1254,32 +1183,18 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
       }
       return { state: { pending: rest, failed } };
     },
-    // The floating button: straight to the search page, empty and ready for the words.
+    // The search button in the bar opens the box; its words go to Kino's own search of this plugin (plugin.search, filtered to what
+    // embed69 actually has), and the back button closes the box without leaving the screen.
     openSearch() {
-      return { route: { push: "search" }, state: { sq: "", sstate: null } };
+      return { state: { searching: true } };
     },
-    search({ value, route }) {
-      const q = value && typeof value.q === "string" ? value.q.trim().slice(0, 100) : "";
-      if (q === "") return null;
-      const state = { sq: q, sstate: "loading" };
-      return route && route.name === "search" ? { state } : { route: { push: "search" }, state };
+    closeSearch() {
+      return { state: { searching: false } };
     },
-    // The search page's timer: one search per press, then no timer.
-    async stick({ state }) {
-      const q = typeof state.sq === "string" ? state.sq : "";
-      if (q === "" || state.sstate !== "loading") return null;
-      try {
-        const out = await searchTitles(q);
-        found = { q, items: (Array.isArray(out) ? out : []).slice(0, 60).map(cardOf) };
-        rememberFound(found.items);
-        return { state: { sstate: "done" } };
-      } catch (e) {
-        log("browse search", e && e.code || "error");
-        return { state: { sstate: "fail" } };
-      }
-    },
-    sretry({ state }) {
-      return typeof state.sq === "string" && state.sq !== "" ? { state: { sstate: "loading" } } : null;
+    search({ value, state }) {
+      const typed = value && typeof value === "object" && typeof value.q === "string" ? value.q : typeof value === "string" ? value : state.inputs && state.inputs.q;
+      const q = String(typed == null ? "" : typed).trim().slice(0, 100);
+      return q ? { go: { search: { q } }, state: { searching: false } } : { state: { searching: false } };
     },
     // The gear: the plugin's settings are a page of their own, one Back away.
     go({ arg }) {
@@ -1287,7 +1202,7 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles }) {
     },
     back({ state, route }) {
       if (route && route.name === "settings" && !state.fromBrowse) return { close: true };
-      return { route: { pop: true }, state: { sq: null, sstate: null } };
+      return { route: { pop: true } };
     }
   };
   async function event(ev) {
@@ -1665,8 +1580,7 @@ function installGateView(device) {
 var browseInstance = null;
 var browseScreen = () => browseInstance ?? (browseInstance = makeBrowse({
   kino,
-  loadTab: async () => ({ rows: await home() }),
-  searchTitles: (q) => search({ q })
+  loadTab: async () => ({ rows: await home() })
 }));
 async function screen(ctx) {
   await null;

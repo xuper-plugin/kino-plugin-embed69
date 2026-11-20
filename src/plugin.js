@@ -440,7 +440,6 @@ let browseInstance = null;
 const browseScreen = () => (browseInstance ??= makeBrowse({
   kino,
   loadTab: async () => ({ rows: await home() }),
-  searchTitles: (q) => search({ q }),
 }));
 
 /** `screen(ctx)`: the install gate while the resolver is missing, the rich browse screen once it is there. */

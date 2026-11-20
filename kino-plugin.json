@@ -1,7 +1,7 @@
 {
  "id": "embed69",
  "name": "Embed 69",
- "version": "1.4.0",
+ "version": "1.4.1",
  "apiVersion": 20,
  "entry": "plugin.js",
  "icon": "icon.png",
