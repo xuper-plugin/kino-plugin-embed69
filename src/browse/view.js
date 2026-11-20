@@ -42,9 +42,7 @@ const slideNode = (s) => ({
     { type: "ElevatedButton", key: "watch-" + s.id, ...twin("brWatch", "labelText"), icon: "play",
       onPressed: { go: { play: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } } },
     { type: "TextButton", key: "info-" + s.id, ...twin("brInfo", "labelText"),
-      onPressed: s.kind === "movie" || s.kind === "series"
-        ? { go: { screen: { args: openArgs(s) } } }
-        : { go: { title: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } } },
+      onPressed: { go: { title: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } } },
   ],
 });
 
@@ -97,13 +95,13 @@ export function browseView({ tab, data, recent, pending, failed, device = "phone
       divider: false,
       leading: { type: "IconButton", key: "close", icon: "close", ...twin("brClose", "labelText"), ...twin("brClose", "tooltip"), onPressed: { go: { close: true } } },
       // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
-      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin("brSearch", "labelText"), ...twin("brSearch", "tooltip"), onPressed: "openSearch" }, gear] : [gear],
+      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin("brSearch", "labelText"), ...twin("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } }, gear] : [gear],
       title: tv
         // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
         ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] }
         : logo(),
     },
-    ...(tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin("brSearch", "tooltip"), onPressed: "openSearch" } }),
+    ...(tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } } }),
     // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
       // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).

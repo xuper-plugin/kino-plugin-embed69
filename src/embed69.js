@@ -55,3 +55,12 @@ export async function listCopies(title, { kino, req }) {
   }
   return out;
 }
+
+/** A cheap availability check: true when embed69.org actually has this title (a movie's /f/<imdb>, a series' S1E1).
+ *  embed69.org has no catalog of its own, so the plugin's TMDB search is filtered against it with this. */
+export async function hasTitle(kino, req, imdbId, kind) {
+  if (!/^tt\d{5,12}$/.test(String(imdbId || ""))) return false;
+  const path = kind === "series" || kind === "tv" ? `${imdbId}-1x01` : imdbId;
+  const html = await getThroughAnubis(kino, req, `${SITE}/f/${path}`, { headers: HEADERS });
+  return !!html && /let\s+dataLink\s*=\s*\[/.test(html);
+}

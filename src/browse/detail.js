@@ -32,7 +32,7 @@ const opensPage = (card) => !!card && (card.kind === "movie" || card.kind === "s
 /** One poster card; a movie or a series opens its page through the screen's own `openTitle` event (the card's tap), anything else keeps Kino's page. */
 export const cardNode = (card, size, scope) => ({
   type: "titleCard", key: `${scope}-${card.id}`, size, item: card,
-  ...(opensPage(card) ? { onTap: { event: "openTitle", arg: JSON.stringify(openArgs(card)) } } : {}),
+  ...(opensPage(card) ? { onTap: { go: { title: { ref: card.ref, kind: card.kind, id: card.id, title: card.title } } } } : {}),
 });
 
 /** A horizontal row of poster cards under [key]. */

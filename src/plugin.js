@@ -8,7 +8,7 @@
 // Declared hosts: embed69.org and the players'. `streamHosts: "any"` is for the CDNs the players redirect to, and `browser` for
 // Voe, whose rotating domain and "confirm you are human" page only a real browser (Kino's hidden page) gets through.
 
-import { listCopies, SITE } from "./embed69.js";
+import { listCopies, SITE, hasTitle } from "./embed69.js";
 import { makeReq, UA } from "./util/http.js";
 import { makeBrowse } from "./browse/index.js";
 
@@ -190,29 +190,46 @@ export async function home() {
 
 // ---- search ----
 
+// embed69.org has no catalog of its own, so a TMDB search is filtered to only the titles it actually has (the top
+// SEARCH_CHECK_CAP by relevance are checked against embed69, to stay inside kino.meta's rate budget).
+const SEARCH_CHECK_CAP = 18;
+
+/** Keep only the titles embed69.org actually has, in the ranked order. */
+async function availableOnly(items, req) {
+  const checks = await Promise.all(items.slice(0, SEARCH_CHECK_CAP).map(async (item) => {
+    const m = /^[ms]:(\d+)$/.exec(item.ref || "");
+    if (!m) return null;
+    try {
+      const imdb = await imdbFor(m[1], item.kind === "series" ? "series" : "movie");
+      return imdb && (await hasTitle(kino, req, imdb, item.kind)) ? item : null;
+    } catch (_) { return null; }
+  }));
+  return checks.filter(Boolean);
+}
+
 export async function search(query) {
   if (!String(query.q || "").trim()) return [];
+  const req = makeReq(kino, { deadline: Date.now() + 30000 });
   const type = query.type;
-
+  let ranked;
   if (type === "series") {
     const res = await kino.tmdb("/search/tv", { query: query.q });
-    return kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
-  }
-  if (type === "movie") {
+    ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
+  } else if (type === "movie") {
     const res = await kino.tmdb("/search/movie", { query: query.q });
-    return kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
+    ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
+  } else {
+    const [movies, tv] = await Promise.all([
+      kino.tmdb("/search/movie", { query: query.q }),
+      kino.tmdb("/search/tv", { query: query.q }),
+    ]);
+    const all = [
+      ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
+      ...(tv?.results || []).map((r) => itemFromTmdb(r, "tv")),
+    ];
+    ranked = kino.rank.sortBySimilarity(all, titlesOf(query));
   }
-
-  // "any", and the kinds this plugin has nothing for (anime, music, podcast): both catalogs, ranked by how they match
-  const [movies, tv] = await Promise.all([
-    kino.tmdb("/search/movie", { query: query.q }),
-    kino.tmdb("/search/tv", { query: query.q }),
-  ]);
-  const all = [
-    ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
-    ...(tv?.results || []).map((r) => itemFromTmdb(r, "tv")),
-  ];
-  return kino.rank.sortBySimilarity(all, titlesOf(query));
+  return availableOnly(ranked, req);
 }
 
 // ---- browse ----

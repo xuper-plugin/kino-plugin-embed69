@@ -107,6 +107,12 @@ async function listCopies(title, { kino: kino2, req }) {
   }
   return out;
 }
+async function hasTitle(kino2, req, imdbId, kind) {
+  if (!/^tt\d{5,12}$/.test(String(imdbId || ""))) return false;
+  const path = kind === "series" || kind === "tv" ? `${imdbId}-1x01` : imdbId;
+  const html = await getThroughAnubis(kino2, req, `${SITE}/f/${path}`, { headers: HEADERS });
+  return !!html && /let\s+dataLink\s*=\s*\[/.test(html);
+}
 
 // src/util/http.js
 var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -558,17 +564,13 @@ var num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 var https = (v) => typeof v === "string" && HTTPS2.test(v) && v.length <= 2048 ? v : void 0;
-function titleRefOf(ref) {
-  const m = /^([ms]):(\d{1,10})$/.exec(String(ref || ""));
-  return m ? { kind: m[1] === "m" ? "movie" : "series", id: Number(m[2]) } : null;
-}
 var opensPage = (card) => !!card && (card.kind === "movie" || card.kind === "series") && typeof card.ref === "string" && card.ref.length < 600 && typeof card.id === "string";
 var cardNode = (card, size, scope) => ({
   type: "titleCard",
   key: `${scope}-${card.id}`,
   size,
   item: card,
-  ...opensPage(card) ? { onTap: { event: "openTitle", arg: JSON.stringify(openArgs(card)) } } : {}
+  ...opensPage(card) ? { onTap: { go: { title: { ref: card.ref, kind: card.kind, id: card.id, title: card.title } } } } : {}
 });
 var cardRow = (items, key, size) => ({ type: "SingleChildScrollView", key: key + "-s", direction: "horizontal", children: [{ type: "Row", key: key + "-r", gap: 12, children: items.map((c) => cardNode(c, size, key)) }] });
 var cardGrid = (items, key) => ({ type: "GridView", key, columns: { compact: 3, expanded: 6 }, children: items.map((c) => cardNode(c, "medium", key)) });
@@ -588,12 +590,6 @@ function backdropsOf(images, first) {
   const out = [];
   for (const u of [first, ...list]) if (u && !out.some((x) => x.slice(x.lastIndexOf("/")) === u.slice(u.lastIndexOf("/")))) out.push(u);
   return out.slice(0, 6);
-}
-function openArgs(card) {
-  const r = titleRefOf(card.ref);
-  const tmdb = r ? r.id : card.ids && Number.isInteger(card.ids.tmdb) ? card.ids.tmdb : 0;
-  const year = card.year ? num(card.year) : 0;
-  return { open: card.ref, i: card.id, t: String(card.title || "").slice(0, 100), k: card.kind, ...tmdb ? { d: tmdb } : {}, ...year ? { y: year } : {} };
 }
 var hoursOf = (min) => {
   const m = num(min);
@@ -834,7 +830,7 @@ var slideNode = (s) => ({
       type: "TextButton",
       key: "info-" + s.id,
       ...twin2("brInfo", "labelText"),
-      onPressed: s.kind === "movie" || s.kind === "series" ? { go: { screen: { args: openArgs(s) } } } : { go: { title: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } }
+      onPressed: { go: { title: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } }
     }
   ]
 });
@@ -890,10 +886,10 @@ function browseView({ tab, data, recent, pending, failed, device = "phone" }) {
       divider: false,
       leading: { type: "IconButton", key: "close", icon: "close", ...twin2("brClose", "labelText"), ...twin2("brClose", "tooltip"), onPressed: { go: { close: true } } },
       // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
-      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: "openSearch" }, gear] : [gear],
+      actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } }, gear] : [gear],
       title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo()
     },
-    ...tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin2("brSearch", "tooltip"), onPressed: "openSearch" } },
+    ...tv ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin2("brSearch", "tooltip"), onPressed: { go: { searchScreen: true } } } },
     // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
       // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).
@@ -1465,26 +1461,43 @@ async function home() {
   if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t2("unavailable") });
   return rows;
 }
+var SEARCH_CHECK_CAP = 18;
+async function availableOnly(items, req) {
+  const checks = await Promise.all(items.slice(0, SEARCH_CHECK_CAP).map(async (item) => {
+    const m = /^[ms]:(\d+)$/.exec(item.ref || "");
+    if (!m) return null;
+    try {
+      const imdb = await imdbFor(m[1], item.kind === "series" ? "series" : "movie");
+      return imdb && await hasTitle(kino, req, imdb, item.kind) ? item : null;
+    } catch (_) {
+      return null;
+    }
+  }));
+  return checks.filter(Boolean);
+}
 async function search(query) {
   if (!String(query.q || "").trim()) return [];
+  const req = makeReq(kino, { deadline: Date.now() + 3e4 });
   const type = query.type;
+  let ranked;
   if (type === "series") {
     const res = await kino.tmdb("/search/tv", { query: query.q });
-    return kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
-  }
-  if (type === "movie") {
+    ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
+  } else if (type === "movie") {
     const res = await kino.tmdb("/search/movie", { query: query.q });
-    return kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
+    ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
+  } else {
+    const [movies, tv] = await Promise.all([
+      kino.tmdb("/search/movie", { query: query.q }),
+      kino.tmdb("/search/tv", { query: query.q })
+    ]);
+    const all = [
+      ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
+      ...(tv?.results || []).map((r) => itemFromTmdb(r, "tv"))
+    ];
+    ranked = kino.rank.sortBySimilarity(all, titlesOf(query));
   }
-  const [movies, tv] = await Promise.all([
-    kino.tmdb("/search/movie", { query: query.q }),
-    kino.tmdb("/search/tv", { query: query.q })
-  ]);
-  const all = [
-    ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
-    ...(tv?.results || []).map((r) => itemFromTmdb(r, "tv"))
-  ];
-  return kino.rank.sortBySimilarity(all, titlesOf(query));
+  return availableOnly(ranked, req);
 }
 async function browse(ref, cursor) {
   const page = cursor ? Number(cursor) : 1;
