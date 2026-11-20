@@ -877,15 +877,14 @@ function browseView({ tab, data, recent, pending, failed, searching = false, dev
     dense: true,
     divider: false,
     leading: { type: "IconButton", key: "close", icon: "close", ...twin2("brClose", "labelText"), ...twin2("brClose", "tooltip"), onPressed: { go: { close: true } } },
-    // On a TV the search is a button of the bar (a floating one is hard to reach with a remote); elsewhere it floats.
-    actions: tv ? [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: "openSearch" }, gear] : [gear],
+    // The search button sits in the bar next to the gear (not a floating button), on a phone as on a TV.
+    actions: [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: "openSearch" }, gear],
     // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
     title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo()
   };
   return {
     type: "Scaffold",
     appBar,
-    ...tv || searching ? {} : { floatingActionButton: { type: "FloatingActionButton", key: "searchFab", icon: "search", ...twin2("brSearch", "tooltip"), onPressed: "openSearch" } },
     // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
       // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).
