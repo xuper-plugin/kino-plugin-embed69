@@ -2,7 +2,6 @@
 // will replace them, so nothing jumps when the rows arrive. Every text is in both languages.
 import { both } from "../i18n.js";
 import { TAB_IDS } from "./model.js";
-import { LOGO_DATA, LOGO_ASPECT } from "./logo.js";
 import { detailView, openArgs, cardRow, cardGrid } from "./detail.js";
 
 const TAB_KEYS = { inicio: "tabHome", peliculas: "tabMovies", series: "tabSeries" };
@@ -15,10 +14,7 @@ export const twin = (key, field = "text", vars) => {
   return { [field]: w.es, [field + "En"]: w.en };
 };
 
-const logo = () => ({
-  type: "Image", key: "logo", url: LOGO_DATA, aspect: LOGO_ASPECT, fit: "contain", h: 40, alt: "Latino", altEn: "Latino",
-  fallback: { type: "Text", text: "Latino", textEn: "Latino", style: "h4" },
-});
+const logo = () => ({ type: "Text", key: "logo", text: "Embed69", textEn: "Embed69", style: "h4" });
 const tabBar = (active) => ({ type: "TabBar", key: "tabs", divider: false, value: active, onChanged: "tab", tabs: TAB_IDS.map((id) => ({ value: id, ...twin(TAB_KEYS[id], "label") })) });
 
 /** The skeleton of one rail: a heading bar and a row of poster cards (three on a phone, six on a wide window). */
