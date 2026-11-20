@@ -8,9 +8,7 @@
 // Declared hosts: embed69.org and the players'. `streamHosts: "any"` is for the CDNs the players redirect to, and `browser` for
 // Voe, whose rotating domain and "confirm you are human" page only a real browser (Kino's hidden page) gets through.
 
-import { listCopies } from "./embed69.js";
-import { extractorFor } from "./extractors/index.js";
-import { GONE } from "./extractors/shared.js";
+import { listCopies, SITE } from "./embed69.js";
 import { makeReq, UA } from "./util/http.js";
 
 // Kino waits for every request a call left running before it delivers the call's answer; ask it to drop them once the call settles.
@@ -25,6 +23,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** One resolve: the page (a proof of work and a request) and a few players, each bounded by its own request time. */
 const RESOLVE_MS = 40000;
 const MAX_COPIES = 8;
+const MAX_CAPTURES = 1;
+const CAPTURE_MS = 20000;
+const HLS = "application/vnd.apple.mpegurl";
 
 // ---- i18n ----
 
@@ -340,16 +341,28 @@ function toStream(s, c) {
   return out;
 }
 
-/** One copy opened: the stream, GONE when the host no longer has the file, or null when its player shows none (or fails). */
-async function open(c, req) {
-  const ex = extractorFor(c.embedUrl);
-  if (!ex) return null;
+/** One copy opened through the shared kino-resolver (its provider door), with the hidden browser as the fallback; null when none. */
+async function open(c, req, budget) {
   try {
-    const s = await ex.extract(c.embedUrl, req, kino);
-    if (s && s.gone) return GONE;
-    return s && typeof s.url === "string" && s.url ? toStream(s, c) : null;
+    const res = await kino.plugins.call("resolver", "resolve", { url: c.embedUrl, referer: SITE + "/" });
+    const s = (res && Array.isArray(res.streams) ? res.streams : []).find((x) => x && x.url);
+    if (s) {
+      const headers = {};
+      if (s.referer) headers.Referer = s.referer;
+      if (Array.isArray(s.headers)) for (const h of s.headers) if (h && h.name) headers[h.name] = String(h.value);
+      return toStream({ url: s.url, headers, mime: s.kind === "hls" ? HLS : (/\.mp4(\?|$)/i.test(s.url) ? "video/mp4" : HLS), subtitles: res.subtitles, durationMs: s.durationMs }, c);
+    }
+  } catch (_) { /* provider_missing / failed: the hidden browser may still reach it */ }
+  if (!kino.browser || typeof kino.browser.capture !== "function" || !budget || budget.captures <= 0) return null;
+  budget.captures -= 1;
+  try {
+    const page = await kino.browser.capture(c.embedUrl, { timeoutMs: CAPTURE_MS, match: "\\.m3u8|\\.mp4", headers: { Referer: SITE + "/" } });
+    const media = (page && page.media) || [];
+    const best = media.find((x) => /m3u8/i.test(x.url)) || media[0];
+    if (!best) return null;
+    return toStream({ url: best.url, headers: best.headers || { Referer: c.embedUrl }, mime: best.mime || (/\.mp4/i.test(best.url) ? "video/mp4" : HLS) }, c);
   } catch (e) {
-    kino.log("[embed69]", c.server, (e && e.code) || "extract_failed");
+    kino.log("[embed69] capture", (e && e.code) || "failed");
     return null;
   }
 }
@@ -377,8 +390,7 @@ export async function resolve(ref) {
     const want = parseCopyRef(ref);
     if (!want) throw kino.error("not_found", "bad copy ref");
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
-    const stream = copy ? await open(copy, req) : null;
-    if (stream === GONE) throw kino.error("not_found", "copy gone: " + want.lang + "/" + want.server, { userMessage: t("gone") });
+    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES }) : null;
     if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
     return stream;
   }
@@ -387,27 +399,16 @@ export async function resolve(ref) {
   const copies = ordered(await listCopies(title, { kino, req }));
   if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t("noStreams") });
 
-  // The first copy that opens plays; the rest are lazy copies, opened only if the person (or the fallback) reaches them. A host that
-  // says a file is gone has deleted the whole upload of that language, so its other copies are not tried (a dead copy costs
-  // half a second, a slow one eight) and are not offered either.
+  // The first copy that opens plays; the rest are lazy copies, opened only if the person (or the fallback) reaches them. One
+  // capture is shared across the attempt, so a title whose hosts are all gated still tries one in the hidden browser.
+  const budget = { captures: MAX_CAPTURES };
   let main = null;
-  let tried = 0;
-  const goneLangs = new Set();
-  let timedOut = false;
   for (const c of copies) {
-    if (goneLangs.has(c.lang)) continue;
-    tried++;
-    const r = await open(c, req);
-    if (r === GONE) { goneLangs.add(c.lang); continue; }
+    const r = await open(c, req, budget);
     if (r) { main = r; break; }
-    timedOut = true;
   }
-  if (!main) {
-    // Every language tried said "gone" and nothing merely failed: the title's links have expired, not this plugin or the network
-    const everyOneGone = goneLangs.size > 0 && !timedOut;
-    throw kino.error("not_found", (everyOneGone ? "links gone for " : "no copy opened for ") + title.imdbId, { userMessage: t(everyOneGone ? "gone" : "noStreams") });
-  }
-  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1).filter((c) => !goneLangs.has(c.lang));
+  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
+  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1);
   const alternatives = rest.slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
   return { ...main, ...(alternatives.length ? { alternatives } : {}) };
 }

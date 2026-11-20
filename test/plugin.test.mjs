@@ -1,5 +1,6 @@
 // node --test test/plugin.test.mjs
-// Offline: a fake embed69.org (a real proof of work and AES-256-CBC links, made here), fake players and a stub of `kino`.
+// Offline: a fake embed69.org (LINK_CHALLENGE + AES-256-CBC links, and its Anubis check page, made here), a stub of `kino`, and a
+// stub of the shared kino-resolver door (`kino.plugins.call("resolver","resolve")`).
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,6 +14,7 @@ let tmdbImpl = async () => ({ results: [] });
 let metaImpl = async () => null;
 let pages = {};          // url -> { status?, body } (a function answers per request)
 let logs = [];
+let resolverImpl = () => ({ streams: [] }); // the shared kino-resolver's door, stubbed per test
 globalThis.kino = {
   lang: "es",
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -24,6 +26,12 @@ globalThis.kino = {
     const r = typeof p === "function" ? p(url, opts) : p;
     const status = r.status ?? 200;
     return { ok: status < 400, status, text: () => r.body, json: () => JSON.parse(r.body) };
+  },
+  plugins: {
+    call: async (name, method, arg) => {
+      if (name === "resolver" && method === "resolve") return resolverImpl(arg);
+      throw globalThis.kino.error("provider_missing", "no provider " + name);
+    },
   },
   crypto: {
     hash: (alg, text) => createHash(alg).update(text).digest("hex"),
@@ -40,34 +48,28 @@ globalThis.kino = {
 };
 const plugin = await import("../plugin.js");
 
-beforeEach(() => { calls.length = 0; tmdbCalls.length = 0; logs = []; config = {}; pages = {}; tmdbImpl = async () => ({ results: [] }); metaImpl = async () => null; });
+beforeEach(() => { calls.length = 0; tmdbCalls.length = 0; logs = []; config = {}; pages = {}; tmdbImpl = async () => ({ results: [] }); metaImpl = async () => null; resolverImpl = defaultResolver; });
 
-// ---- a fake embed69.org ----
+// ---- a fake embed69.org (LINK_CHALLENGE scheme, 2026-11) ----
 
-const CHALLENGE = "abc123", SALT = "salt9", DIFFICULTY = 2;
-const pow = (() => { for (let n = 0; ; n++) if (createHash("sha256").update(CHALLENGE + n).digest("hex").startsWith("0".repeat(DIFFICULTY))) return n; })();
-const KEY = createHash("sha256").update(CHALLENGE + pow + SALT).digest();
-const encrypt = (url) => { const iv = randomBytes(16); const c = createCipheriv("aes-256-cbc", KEY, iv); return Buffer.concat([iv, c.update(url, "utf8"), c.final()]).toString("base64"); };
+const CHALLENGE = "abc123", SALT = "salt9";
+const KEY = createHash("sha256").update(CHALLENGE + SALT).digest();
+// The site wraps each decrypted link in backticks; the plugin strips them.
+const encrypt = (url) => { const iv = randomBytes(16); const c = createCipheriv("aes-256-cbc", KEY, iv); return Buffer.concat([iv, c.update("`" + url + "`", "utf8"), c.final()]).toString("base64"); };
 /** The site's page for a title: one block per language, each with its players. */
-const sitePage = (blocks, { difficulty = DIFFICULTY } = {}) => `<html><script>
-const POW_CHALLENGE = '${CHALLENGE}'; const POW_SALT = '${SALT}'; const POW_DIFFICULTY = ${difficulty};
+const sitePage = (blocks) => `<html><script>
+const LINK_CHALLENGE = '${CHALLENGE}'; const LINK_SALT = '${SALT}';
 let dataLink = ${JSON.stringify(blocks.map(([lang, embeds]) => ({ video_language: lang, sortedEmbeds: embeds.map(([servername, url]) => ({ servername, link: encrypt(url) })) })))};
 </script></html>`;
 
 const SW = (id) => `https://hglink.to/e/${id}`, VH = (id) => `https://morencius.com/embed/${id}`, VOE = (id) => `https://voe.sx/e/${id}`;
-const WISH_PAGE = (name) => `{"hls4":"https://vibuxer.com/stream/${name}/master.m3u8"}`;
-const HIDE_PAGE = (name) => `{"hls4":"https://morencius.com/stream/${name}/master.m3u8"}`;
-/** Everything a title needs: the site page and the players of its copies. */
+/** The shared resolver, stubbed: it opens a known embed to a predictable m3u8 named after the embed's id. */
+const streamFor = (url) => { const m = /\/(?:e|embed)\/([\w-]+)/.exec(String(url || "")); return m ? `https://cdn.example/${m[1]}.m3u8` : null; };
+const defaultResolver = ({ url }) => { const s = streamFor(url); return s ? { streams: [{ url: s, kind: "hls" }] } : { streams: [] }; };
+
+/** The site page for a title at its path. */
 function serve(path, blocks, extra = {}) {
-  pages = {
-    ["https://embed69.org/f/" + path]: { body: sitePage(blocks) },
-    "https://vibuxer.com/e/swlat": { body: WISH_PAGE("lat") },
-    "https://vibuxer.com/e/swesp": { body: WISH_PAGE("esp") },
-    "https://vibuxer.com/e/swsub": { body: WISH_PAGE("sub") },
-    "https://morencius.com/embed/vhlat": { body: HIDE_PAGE("lat") },
-    "https://voe.sx/e/voelat": { body: `<script>window.location.href = 'https://rotating.example/e/voelat'</script>` },
-    ...extra,
-  };
+  pages = { ["https://embed69.org/f/" + path]: { body: sitePage(blocks) }, ...extra };
 }
 const ALL = [
   ["LAT", [["streamwish", SW("swlat")], ["vidhide", VH("vhlat")], ["voe", VOE("voelat")]]],
@@ -77,32 +79,34 @@ const ALL = [
 
 const manifest = JSON.parse(readFileSync(new URL("../kino-plugin.json", import.meta.url), "utf8"));
 
-test("the manifest is valid for Kino and declares the site and every player's hosts", () => {
+test("the manifest is valid, consumes the shared resolver, and declares the site and the players' hosts", () => {
   const out = validateManifest(readFileSync(new URL("../kino-plugin.json", import.meta.url), "utf8"));
   assert.ok(!out.errors?.length, JSON.stringify(out.errors));
   for (const h of ["embed69.org", "hglink.to", "vibuxer.com", "morencius.com", "voe.sx"]) assert.ok(manifest.hosts.includes(h), h);
-  assert.equal(manifest.browser, "pages"); // page(): the site's Anubis check needs a real browser
+  assert.equal(manifest.apiVersion, 20);
+  assert.ok(manifest.consumes && manifest.consumes.resolver, "consumes the resolver");
+  assert.deepEqual(manifest.recommends, ["xuper-plugin/kino-plugin-kino-resolver"]);
+  assert.equal(manifest.browser, true); // capture is the fallback for a gate host the resolver's inline pass cannot crack
   assert.ok(manifest.capabilities.includes("download"));
 });
 
-test("a movie asks /f/<imdb> with the partner's Referer and plays the first copy that opens: Latino on StreamWish", async () => {
+test("a movie asks /f/<imdb> with the partner's Referer and plays the first copy the resolver opens: Latino on StreamWish", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
   const a = await plugin.resolve("m:603");
   assert.equal(calls[0].url, "https://embed69.org/f/tt0133093");
   assert.equal(calls[0].opts.headers.Referer, "https://sololatino.net/");
-  assert.equal(a.url, "https://vibuxer.com/stream/lat/master.m3u8");
+  assert.equal(a.url, "https://cdn.example/swlat.m3u8");
   assert.equal(a.label, "Latino · StreamWish");
   assert.equal(a.mime, "application/vnd.apple.mpegurl");
   assert.match(a.headers["User-Agent"], /Mozilla/);
-  assert.equal(a.headers.Referer, "https://vibuxer.com/");
 });
 
-test("every request carries a browser User-Agent (the players answer okhttp's with a page that has no playlist), beside the source's own headers", async () => {
+test("every request carries a browser User-Agent, beside the source's own headers", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
   await plugin.resolve("m:603");
-  assert.ok(calls.length >= 2);
+  assert.ok(calls.length >= 1);
   for (const c of calls) assert.match(c.opts.headers["User-Agent"], /^Mozilla\/5\.0 .*Chrome/, c.url);
   assert.equal(calls[0].opts.headers.Referer, "https://sololatino.net/");
 });
@@ -115,7 +119,6 @@ test("the other copies are lazy refs, preferred language first, faster servers f
   assert.deepEqual(a.alternatives.map((x) => x.ref), [
     "cp:movie:tt0133093:lat:voe", "cp:movie:tt0133093:lat:vidhide", "cp:movie:tt0133093:esp:streamwish", "cp:movie:tt0133093:sub:streamwish"]);
   assert.ok(a.alternatives.every((x) => x.ref.length <= 512 && !x.url));
-  assert.ok(!calls.some((c) => c.url.includes("morencius.com")), "a lazy copy is not opened up front");
 });
 
 test("the language setting puts Castellano or Subtitulado first", async () => {
@@ -132,31 +135,34 @@ test("the language setting puts Castellano or Subtitulado first", async () => {
 test("a lazy copy opens just that server; one the site no longer lists is not_found", async () => {
   serve("tt0133093", ALL);
   const a = await plugin.resolve("cp:movie:tt0133093:lat:vidhide");
-  assert.equal(a.url, "https://morencius.com/stream/lat/master.m3u8");
+  assert.equal(a.url, "https://cdn.example/vhlat.m3u8");
   assert.equal(a.label, "Latino · VidHide");
   assert.equal(a.alternatives, undefined);
   await assert.rejects(() => plugin.resolve("cp:movie:tt0133093:sub:voe"), (e) => e.code === "not_found" && e.userMessage === "No se encontraron fuentes para este título.");
   await assert.rejects(() => plugin.resolve("cp:garbage"), (e) => e.code === "not_found");
 });
 
-test("a copy whose player shows nothing is skipped: the next one plays", async () => {
+test("a copy the resolver cannot open is skipped: the next one plays, and the one that failed is not offered again", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": { status: 500, body: "" } });
+  serve("tt0133093", ALL);
+  resolverImpl = ({ url }) => (url === SW("swlat") ? { streams: [] } : defaultResolver({ url }));
   const a = await plugin.resolve("m:603");
-  assert.equal(a.label, "Latino · VidHide");
+  assert.equal(a.label, "Latino · Voe"); // StreamWish failed, Voe is next in order
   assert.ok(!a.alternatives.some((x) => x.label === "Latino · StreamWish"), "the one that failed is not offered again");
 });
 
-test("Voe without the hidden browser cannot open; with nothing else, the person reads a readable error", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt1" + "0".repeat(5) } });
+test("when the resolver opens nothing and there is no browser, the person reads a readable error", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt100000" } });
   serve("tt100000", [["LAT", [["voe", VOE("voelat")]]]]);
+  resolverImpl = () => ({ streams: [] });
   await assert.rejects(() => plugin.resolve("m:1"), (e) => e.code === "not_found" && e.userMessage === "No se encontraron fuentes para este título.");
 });
 
-test("Voe through the hidden browser plays what the page shows", async () => {
+test("when the resolver is not installed, the hidden-browser capture is the fallback and plays what the page shows", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", [["LAT", [["voe", VOE("voelat")]]]]);
-  globalThis.kino.browser = { captureAll: true, capture: async () => ({ media: [{ url: "https://cdn.example/v/master.m3u8" }] }) };
+  resolverImpl = () => { throw kino.error("provider_missing", "not installed"); };
+  globalThis.kino.browser = { capture: async () => ({ media: [{ url: "https://cdn.example/v/master.m3u8" }] }) };
   try {
     const a = await plugin.resolve("m:603");
     assert.equal(a.url, "https://cdn.example/v/master.m3u8");
@@ -170,16 +176,14 @@ test("an episode asks /f/<imdb>-<s>x<ee> and its lazy refs name season and episo
   assert.equal(calls[0].url, "https://embed69.org/f/tt0903747-2x05");
   assert.equal(a.alternatives[0].ref, "cp:ep:tt0903747:2:5:lat:voe");
   const lazy = await plugin.resolve("cp:ep:tt0903747:2:5:esp:streamwish");
-  assert.equal(lazy.url, "https://vibuxer.com/stream/esp/master.m3u8");
+  assert.equal(lazy.url, "https://cdn.example/swesp.m3u8");
 });
 
-test("nothing listed, an error page or a difficulty a TV should not grind through all end in not_found", async () => {
+test("nothing listed or an error page ends in not_found", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   pages = { "https://embed69.org/f/tt0133093": { body: `{"error":"not found"}` } };
   await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found");
   pages = { "https://embed69.org/f/tt0133093": { status: 404, body: "" } };
-  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found");
-  pages = { "https://embed69.org/f/tt0133093": { body: sitePage(ALL, { difficulty: 9 }) } };
   await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found");
   await assert.rejects(() => plugin.resolve("nonsense"), (e) => e.code === "not_found");
 });
@@ -190,69 +194,36 @@ test("a title with no IMDB id is not asked", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("links on hosts no extractor knows are left out, and so is the site's download button", async () => {
+test("links that do not decrypt are left out, and so is the site's download button", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", [["LAT", [["download", "https://dl.example/file.mp4"], ["netu", "https://netu.example/e/1"], ["streamwish", SW("swlat")]]]]);
+  serve("tt0133093", [["LAT", [["download", "https://dl.example/file.mp4"], ["streamwish", SW("swlat")]]]]);
   const a = await plugin.resolve("m:603");
   assert.equal(a.label, "Latino · StreamWish");
   assert.equal(a.alternatives, undefined);
 });
 
+// ---- embed69's Anubis check page: the background solver gets past it ----
 
-// ---- links the host no longer has ----
+const ANUBIS = `<html><script id="anubis_challenge" type="application/json">{"rules":{"algorithm":"fast","difficulty":1},"challenge":{"randomData":"anubisdata","id":"anubis-id"}}</script><div id="anubis-main"></div></html>`;
 
-const GONE_PAGE = { body: "<html><body><div>File is no longer available as it expired or has been deleted.</div><script>var player = 'file not found in a script is not text';</script></body></html>" };
-
-test("a language whose StreamWish file is gone is skipped whole (its other servers are not even asked) and the next language plays", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": GONE_PAGE });
-  const a = await plugin.resolve("m:603");
-  assert.equal(a.label, "Castellano · StreamWish");
-  assert.ok(!calls.some((c) => c.url.includes("morencius.com") || c.url.includes("voe.sx")), "VidHide and Voe of the dead language were not asked");
-  assert.deepEqual(a.alternatives.map((x) => x.label), ["Subtitulado · StreamWish"], "and are not offered");
+test("when the site answers its Anubis check page, the background solver passes it and the copies open", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0111161" } });
+  const real = sitePage(ALL);
+  let passed = false;
+  pages = {
+    "https://embed69.org/f/tt0111161": () => ({ body: passed ? real : ANUBIS }),
+    "https://embed69.org/*": (url) => { if (/pass-challenge/.test(url)) { passed = true; return { body: "" }; } return { body: passed ? real : ANUBIS }; },
+  };
+  const a = await plugin.resolve("m:604");
+  assert.ok(calls.some((c) => /pass-challenge/.test(c.url)), "the solver posted the proof of work");
+  assert.equal(a.url, "https://cdn.example/swlat.m3u8");
+  assert.equal(a.label, "Latino · StreamWish");
 });
 
-test("when every language is gone the person reads why, and nothing slow was asked", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": GONE_PAGE, "https://vibuxer.com/e/swesp": GONE_PAGE, "https://vibuxer.com/e/swsub": GONE_PAGE });
-  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found" && e.userMessage === "Los enlaces de este título caducaron o se borraron.");
-  assert.ok(!calls.some((c) => c.url.includes("morencius.com")));
-});
-
-test("a host that answers 404 for the embed is a file that is gone, for StreamWish, VidHide and Voe alike", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", [["LAT", [["voe", VOE("voelat")]]]], { "https://voe.sx/e/voelat": { status: 404, body: "" } });
-  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "Los enlaces de este título caducaron o se borraron.");
-  serve("tt0133093", [["LAT", [["vidhide", VH("vhlat")]]]], { "https://morencius.com/embed/vhlat": { status: 410, body: "" } });
-  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "Los enlaces de este título caducaron o se borraron.");
-});
-
-test("a slow or failing host is not 'gone': the person reads the generic message, and the other copies were still tried", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", [["LAT", [["streamwish", SW("swlat")], ["vidhide", VH("vhlat")]]]], {
-    "https://vibuxer.com/e/swlat": () => { throw Object.assign(new Error("timeout"), { code: "timeout" }); },
-    "https://morencius.com/embed/vhlat": { status: 500, body: "" },
-  });
-  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "No se encontraron fuentes para este título.");
-  assert.ok(calls.some((c) => c.url.includes("morencius.com")), "a failure is not a reason to skip the language");
-});
-
-test("a page that merely mentions a deleted file in a script is not a gone page", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", ALL, { "https://vibuxer.com/e/swlat": { body: `<script>var note = "file not found";</script>{"hls4":"https://vibuxer.com/stream/lat/master.m3u8"}` } });
-  assert.equal((await plugin.resolve("m:603")).label, "Latino · StreamWish");
-});
-
-test("a lazy copy whose file is gone says why", async () => {
-  serve("tt0133093", ALL, { "https://vibuxer.com/e/swesp": GONE_PAGE });
-  await assert.rejects(() => plugin.resolve("cp:movie:tt0133093:esp:streamwish"), (e) => e.code === "not_found" && e.userMessage === "Los enlaces de este título caducaron o se borraron.");
-});
-
-test("the message is in English too", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
-  serve("tt0133093", [["LAT", [["streamwish", SW("swlat")]]]], { "https://vibuxer.com/e/swlat": GONE_PAGE });
-  globalThis.kino.lang = "en";
-  try { await assert.rejects(() => plugin.resolve("m:603"), (e) => e.userMessage === "This title's links expired or were deleted."); } finally { globalThis.kino.lang = "es"; }
+test("Anubis the solver cannot pass ends in not_found instead of crashing", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0050083" } });
+  pages = { "https://embed69.org/f/tt0050083": { body: ANUBIS }, "https://embed69.org/*": { body: ANUBIS } };
+  await assert.rejects(() => plugin.resolve("m:606"), (e) => e.code === "not_found");
 });
 
 // ---- categories ----
@@ -299,7 +270,7 @@ test("home has many rows, each with a genre Kino knows, a ref to browse and at m
   assert.ok(tmdbCalls.length <= 20, "one TMDB call per row, within Kino's 20 per 10 s: " + tmdbCalls.length);
 });
 
-test("every title carries its genres, so the Home can file it in a row per genre (not only 'Películas' and 'Series')", async () => {
+test("every title carries its genres, so the Home can file it in a row per genre", async () => {
   tmdbImpl = async () => ({ results: [{ id: 1, title: "A", poster_path: "/a.jpg", genre_ids: [28, 878, 12, 99999], release_date: "2024-01-01" }, { id: 2, title: "B", poster_path: "/b.jpg", genre_ids: [10759, 10765, 18] }, { id: 3, title: "C", poster_path: "/c.jpg" }] });
   const items = (await plugin.home())[0].items;
   assert.deepEqual(items[0].genres, ["Acción", "Ciencia ficción", "Aventura"]);
@@ -360,51 +331,3 @@ const HOME_PATHS = {
   "g-action": "/discover/movie", "g-comedy": "/discover/movie", "g-scifi": "/discover/movie", "g-horror": "/discover/movie",
   "g-drama": "/discover/movie", kids: "/discover/movie", docs: "/discover/movie", anime: "/discover/tv",
 };
-
-// ---- the site's Anubis check page: only a browser gets past it ----
-
-const ANUBIS = `<html><script id="anubis_challenge" type="application/json">{"rules":{"algorithm":"fast","difficulty":4}}</script><div id="anubis-main"></div></html>`;
-
-test("when the site answers its Anubis check page, the hidden browser reads the real page and the copies open", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0111161" } });
-  serve("tt0111161", ALL);
-  const real = pages["https://embed69.org/f/tt0111161"].body;
-  pages["https://embed69.org/f/tt0111161"] = { body: ANUBIS };
-  const asked = [];
-  kino.browser = { captureAll: true, capture: async () => { throw kino.error("browser_unavailable", "x"); },
-    page: async (url, o) => { asked.push({ url, o }); return { html: real, finalUrl: url, status: 200, truncated: false }; } };
-  try {
-    const a = await plugin.resolve("m:604");
-    assert.equal(asked.length, 1);
-    assert.equal(asked[0].url, "https://embed69.org/f/tt0111161");
-    assert.equal(asked[0].o.waitFor, "POW_CHALLENGE");
-    assert.ok(asked[0].o.timeoutMs >= 1000 && asked[0].o.timeoutMs <= 25000);
-    assert.equal(a.url, "https://vibuxer.com/stream/lat/master.m3u8");
-  } finally { delete kino.browser; }
-});
-
-test("a lazy copy reuses the page the hidden browser already read (one browser read per title, not one per copy)", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0068646" } });
-  serve("tt0068646", ALL);
-  const real = pages["https://embed69.org/f/tt0068646"].body;
-  pages["https://embed69.org/f/tt0068646"] = { body: ANUBIS };
-  let reads = 0;
-  kino.browser = { captureAll: true, capture: async () => null, page: async (url) => { reads++; return { html: real, finalUrl: url, status: 200 }; } };
-  try {
-    const a = await plugin.resolve("m:605");
-    const lazy = a.alternatives.find((x) => x.ref.startsWith("cp:") && !x.ref.endsWith(":voe"));
-    assert.ok(lazy);
-    const b = await plugin.resolve(lazy.ref);
-    assert.ok(b.url);
-    assert.equal(reads, 1);
-  } finally { delete kino.browser; }
-});
-
-test("Anubis with no browser (older Kino), or a browser that is blocked, says there are no sources instead of crashing", async () => {
-  metaImpl = async () => ({ ids: { imdb: "tt0050083" } });
-  serve("tt0050083", ALL);
-  pages["https://embed69.org/f/tt0050083"] = { body: ANUBIS };
-  await assert.rejects(() => plugin.resolve("m:606"), (e) => e.code === "not_found");
-  kino.browser = { captureAll: true, capture: async () => null, page: async () => { throw kino.error("blocked", "check never passed"); } };
-  try { await assert.rejects(() => plugin.resolve("m:606"), (e) => e.code === "not_found"); } finally { delete kino.browser; }
-});

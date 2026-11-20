@@ -1,264 +1,49 @@
-var __defProp = Object.defineProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-
-// src/extractors/streamwish.js
-var streamwish_exports = {};
-__export(streamwish_exports, {
-  HOSTS: () => HOSTS,
-  extract: () => extract
-});
-
-// src/util/http.js
-var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-var REQUEST_MS = 8e3;
-var MIN_MS = 1500;
-function makeReq(kino2, { deadline }) {
-  const req = async (url, opts = {}) => {
-    const left = deadline - Date.now();
-    if (left < MIN_MS) throw kino2.error("timeout", "no time left for " + new URL(url).hostname);
-    return kino2.fetch(url, { headers: { "User-Agent": UA, ...opts.headers || {} }, method: opts.method, body: opts.body, timeoutMs: Math.min(REQUEST_MS, left) });
-  };
-  req.left = () => Math.max(0, deadline - Date.now());
-  return req;
-}
-
-// src/util/unpack.js
-var ALPHA = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-var toNum = (s, radix) => [...s].reduce((n, ch) => n * radix + ALPHA.indexOf(ch), 0);
-function unpack(source) {
-  const m = /}\s*\(\s*'((?:\\'|[^'])*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:\\'|[^'])*)'\.split\('\|'\)/.exec(source || "");
+// src/anubis.js
+var API = "/.within.website/x/cmd/anubis/api/pass-challenge";
+function anubisChallenge(html) {
+  const m = /<script id="anubis_challenge"[^>]*>([\s\S]*?)<\/script>/.exec(String(html || ""));
   if (!m) return null;
-  const payload = m[1].replace(/\\'/g, "'");
-  const radix = Number(m[2]);
-  const keys = m[4].split("|");
-  if (radix < 2 || radix > 62) return null;
-  return payload.replace(/\b[0-9a-zA-Z]+\b/g, (w) => {
-    const i = toNum(w, radix);
-    return Number.isInteger(i) && i >= 0 && keys[i] ? keys[i] : w;
-  });
-}
-
-// src/extractors/shared.js
-var HLS_MIME = "application/vnd.apple.mpegurl";
-function fileM3u8(text, base) {
-  const m = /\bfile\s*:\s*["']([^"']+\.m3u8[^"']*)["']/.exec(text || "");
-  return m ? absolute(m[1], base) : null;
-}
-function hlsKey(text, keys, base) {
-  for (const k of keys) {
-    const m = new RegExp(`["']${k}["']\\s*:\\s*["']([^"']+)["']`).exec(text || "");
-    if (m) return absolute(m[1].replace(/\\\//g, "/"), base);
-  }
-  return null;
-}
-function absolute(href, base) {
+  let j;
   try {
-    return new URL(href, base).href;
+    j = JSON.parse(m[1]);
   } catch (_) {
     return null;
   }
+  const c = j && j.challenge, r = j && j.rules;
+  if (!c || typeof c.randomData !== "string" || typeof c.id !== "string" || !r) return null;
+  const difficulty = Number(r.difficulty);
+  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 6) return null;
+  return { data: c.randomData, id: c.id, difficulty };
 }
-function findIn(html, pick) {
-  return pick(html) || pick(unpack(html) || "") || null;
-}
-function miss(kino2, server, reason) {
-  if (kino2 && typeof kino2.log === "function") kino2.log("[embed69]", server, reason);
-  return null;
-}
-var GONE = Object.freeze({ gone: true });
-var GONE_TEXT = /no longer available|has been deleted|expired or has been deleted|file (was )?not found|video (was )?not found/i;
-function isGone(html) {
-  const visible = String(html || "").replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
-  return GONE_TEXT.test(visible);
-}
-async function pageText(req, url, headers, kino2, server) {
-  const r = await req(url, { headers });
-  if (r.status === 404 || r.status === 410) {
-    miss(kino2, server || "embed", "gone, status " + r.status);
-    return GONE;
-  }
-  return r.ok ? r.text() : miss(kino2, server || "embed", "status " + r.status);
-}
-var LANG_CODES = [
-  [/^(español|espanol|spanish|castellano|latino|spa|esp?)\b/i, "es"],
-  [/^(english|inglés|ingles|eng?)\b/i, "en"],
-  [/^(portugu[eê]s|portuguese|pt)\b/i, "pt"],
-  // never a bare "por": "Por defecto" is not Portuguese
-  [/^(fran[cç]ais|french|franc[eé]s|fre|fra|fr)\b/i, "fr"],
-  [/^(italiano|italian|ita|it)\b/i, "it"],
-  [/^(deutsch|german|alem[aá]n|ger|deu|de)\b/i, "de"]
-];
-function langCode(label) {
-  const s = String(label || "").trim();
-  for (const [re, code] of LANG_CODES) if (re.test(s)) return code;
-  return null;
-}
-function captionTracks(text, base) {
-  const m = /["']?\btracks["']?\s*:\s*\[([\s\S]*?)\]/.exec(text || "");
-  if (!m) return [];
-  const out = [];
-  for (const [obj] of m[1].matchAll(/\{[^{}]*\}/g)) {
-    const field = (k) => (new RegExp(`["']?${k}["']?\\s*:\\s*["']([^"']*)["']`).exec(obj) || [])[1] || "";
-    const kind = field("kind").toLowerCase();
-    if (kind && kind !== "captions" && kind !== "subtitles") continue;
-    const file = field("file");
-    const format = (/\.(vtt|srt)(?:[?#]|$)/i.exec(file) || [])[1];
-    const label = field("label");
-    const lang = langCode(label);
-    const url = format && lang ? absolute(file, base) : null;
-    if (!url || out.some((t2) => t2.url === url)) continue;
-    out.push({ lang, url, label, format: format.toLowerCase() });
-  }
-  return out;
-}
-function durationMsOf(text) {
-  const re = /(?<![-\w])duration["']?\s*:\s*["']?(\d+(?:\.\d+)?)(?![\d.])(?!\s*m?s\b)/g;
-  for (const m of String(text || "").matchAll(re)) {
-    const ms = Math.round(Number(m[1]) * 1e3);
-    if (ms >= 6e4) return ms;
+function solveAnubis(kino2, data, difficulty) {
+  const zeros = "0".repeat(difficulty);
+  for (let nonce = 0; nonce < 2e7; nonce++) {
+    const hash = kino2.crypto.hash("sha256", data + nonce);
+    if (hash.startsWith(zeros)) return { hash, nonce };
   }
   return null;
 }
-function pageExtras(html, base) {
-  const unpacked = unpack(html) || "";
-  const subs = captionTracks(html, base);
-  const subtitles = subs.length ? subs : captionTracks(unpacked, base);
-  const durationMs = durationMsOf(html) || durationMsOf(unpacked);
-  return { ...subtitles.length ? { subtitles } : {}, ...durationMs ? { durationMs } : {} };
-}
-
-// src/extractors/streamwish.js
-var HOSTS = ["hlswish.com", "streamwish.com", "streamwish.to", "strwish.com", "wishembed.com", "filelions.com", "hglink.to", "vibuxer.com"];
-async function extract(embedUrl, req, kino2) {
-  const u = new URL(embedUrl);
-  if (u.hostname === "hglink.to") u.hostname = "vibuxer.com";
-  const referer = u.origin + "/";
-  const html = await pageText(req, u.href, { Referer: referer }, kino2, "streamwish");
-  if (html === GONE) return GONE;
-  if (html == null) return null;
-  const url = findIn(html, (t2) => hlsKey(t2, ["hls4", "hls2", "hls3"], u.origin) || fileM3u8(t2, u.origin));
-  if (!url) return isGone(html) ? (miss(kino2, "streamwish", "gone: the file was deleted or expired"), GONE) : miss(kino2, "streamwish", "no playlist in page");
-  return { url, mime: HLS_MIME, headers: { "User-Agent": UA, Referer: referer }, ...pageExtras(html, u.origin) };
-}
-
-// src/extractors/vidhide.js
-var vidhide_exports = {};
-__export(vidhide_exports, {
-  HOSTS: () => HOSTS2,
-  extract: () => extract2
-});
-var HOSTS2 = ["vidhide.com", "vidhidepro.com", "vidhideplus.com", "dintezuvio.com", "minochinos.com", "filelions.to", "morencius.com"];
-async function extract2(embedUrl, req, kino2) {
-  const u = new URL(embedUrl);
-  const html = await pageText(req, embedUrl, { Referer: u.origin + "/" }, kino2, "vidhide");
-  if (html === GONE) return GONE;
-  if (html == null) return null;
-  const url = findIn(html, (t2) => hlsKey(t2, ["hls4", "hls2"], u.origin) || fileM3u8(t2, u.origin));
-  if (!url) return isGone(html) ? (miss(kino2, "vidhide", "gone: the file was deleted or expired"), GONE) : miss(kino2, "vidhide", "no playlist in page");
-  return { url, mime: HLS_MIME, headers: { Referer: u.origin + "/", Origin: u.origin }, ...pageExtras(html, u.origin) };
-}
-
-// src/extractors/voe.js
-var voe_exports = {};
-__export(voe_exports, {
-  HOSTS: () => HOSTS3,
-  canCapture: () => canCapture,
-  decodeVoe: () => decodeVoe,
-  extract: () => extract3
-});
-var HOSTS3 = ["voe.sx"];
-var JUNK = ["@$", "^^", "~@", "%?", "*~", "!!", "#&"];
-var rot13 = (s) => s.replace(/[a-z]/gi, (c) => {
-  const b = c <= "Z" ? 65 : 97;
-  return String.fromCharCode((c.charCodeAt(0) - b + 13) % 26 + b);
-});
-function decodeVoe(enc) {
-  let s = rot13(enc);
-  for (const j of JUNK) s = s.split(j).join("");
-  s = atob(s);
-  s = [...s].map((c) => String.fromCharCode(c.charCodeAt(0) - 3)).join("");
-  s = [...s].reverse().join("");
-  return JSON.parse(decodeURIComponent(escape(atob(s))));
-}
-var redirectOf = (html) => (/window\.location\.href\s*=\s*'([^']+)'/.exec(html) || [])[1] || null;
-var canCapture = (kino2) => !!(kino2 && kino2.browser && kino2.browser.captureAll === true && typeof kino2.browser.capture === "function");
-var CAPTURE_MS = 12e3;
-var MIN_CAPTURE_MS = 3e3;
-async function capture(embedUrl, req, kino2) {
-  const ms = Math.min(CAPTURE_MS, (req.left ? req.left() : CAPTURE_MS) - 300);
-  if (ms < MIN_CAPTURE_MS) {
-    kino2.log("[embed69]", "voe", "no time to capture");
-    return null;
-  }
-  let cap;
+async function getThroughAnubis(kino2, req, url, opts) {
+  const started = Date.now();
+  let r = await req(url, opts);
+  if (!r.ok) return null;
+  let html = await r.text();
+  const ch = anubisChallenge(html);
+  if (!ch) return html;
+  const sol = solveAnubis(kino2, ch.data, ch.difficulty);
+  if (!sol) return html;
+  const origin = new URL(url).origin;
+  const elapsed = Math.max(1e3, Date.now() - started);
+  const pass = `${origin}${API}?id=${encodeURIComponent(ch.id)}&response=${sol.hash}&nonce=${sol.nonce}&redir=${encodeURIComponent(url)}&elapsedTime=${elapsed}`;
   try {
-    cap = await kino2.browser.capture(embedUrl, { match: "\\.m3u8|\\.mp4", timeoutMs: ms });
-  } catch (e) {
-    kino2.log("[embed69]", "voe capture", e && e.code || "error");
-    return null;
-  }
-  const m = cap && Array.isArray(cap.media) ? cap.media.find((x) => x && typeof x.url === "string" && /^https?:\/\//i.test(x.url)) : null;
-  if (!m) {
-    kino2.log("[embed69]", "voe capture", "no media");
-    return null;
-  }
-  const mime = m.mime || (/\.mp4(?:[?#]|$)/i.test(m.url) ? "video/mp4" : HLS_MIME);
-  return { url: m.url, mime, headers: { Referer: embedUrl, ...m.headers || {} } };
-}
-async function extract3(embedUrl, req, kino2) {
-  const log = (...a) => {
-    if (kino2) kino2.log("[embed69]", "voe", ...a);
-  };
-  const first = await req(embedUrl, { headers: { Referer: embedUrl } });
-  if (first.status === 404 || first.status === 410) {
-    log("gone, embed", first.status);
-    return GONE;
-  }
-  if (!first.ok) {
-    log("embed", first.status);
-    return null;
-  }
-  const html = first.text();
-  if (redirectOf(html)) {
-    if (canCapture(kino2)) return capture(embedUrl, req, kino2);
-    log("rotating host, no browser");
-    return null;
-  }
-  const j = /<script type="application\/json">\s*\["([^"]+)"\]/.exec(html);
-  if (j) {
-    try {
-      const d = decodeVoe(j[1]);
-      const url = d.source || d.direct_access_url;
-      if (url) return { url, mime: /\.mp4/.test(url) ? "video/mp4" : HLS_MIME, headers: { Referer: embedUrl } };
-    } catch (_) {
-    }
-  }
-  const h = /'hls'\s*:\s*'([^']+)'/.exec(html) || /(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/.exec(html);
-  if (!h) {
-    log("no stream in page");
-    return null;
-  }
-  return { url: h[1], headers: { Referer: embedUrl } };
-}
-
-// src/extractors/index.js
-var TABLE = { streamwish: streamwish_exports, vidhide: vidhide_exports, voe: voe_exports };
-function extractorFor(embedUrl) {
-  let host;
-  try {
-    host = new URL(embedUrl).hostname.replace(/^www\./, "");
+    const rp = await req(pass, opts);
+    if (rp && typeof rp.text === "function") await rp.text();
   } catch (_) {
-    return null;
   }
-  for (const [name, mod] of Object.entries(TABLE)) {
-    if (mod.HOSTS.some((h) => host === h || host.endsWith("." + h))) return { name, extract: mod.extract };
-  }
-  return null;
+  const r2 = await req(url, opts);
+  if (!r2 || !r2.ok) return html;
+  return r2.text();
 }
-var HOSTS4 = Object.values(TABLE).flatMap((m) => m.HOSTS);
 
 // src/util/lang.js
 function normLang(text) {
@@ -273,13 +58,6 @@ function normLang(text) {
 // src/embed69.js
 var SITE = "https://embed69.org";
 var HEADERS = { Referer: "https://sololatino.net/" };
-var POW_CAP = 1e5;
-var MAX_DIFFICULTY = 4;
-function solvePow(kino2, challenge, difficulty, cap = POW_CAP) {
-  const zeros = "0".repeat(difficulty);
-  for (let n = 0; n <= cap; n++) if (kino2.crypto.hash("sha256", challenge + n).startsWith(zeros)) return n;
-  return null;
-}
 function decryptLink(kino2, keyHex, b64) {
   const raw = atob(b64);
   let ivHex = "";
@@ -297,54 +75,21 @@ function pathFor(title) {
   if (title.season == null || title.episode == null || !Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < 1) return null;
   return `${title.imdbId}-${s}x${String(e).padStart(2, "0")}`;
 }
-var PAGE_MIN_MS = 4e3;
-var PAGE_MAX_MS = 22e3;
-var PAGE_TTL_MS = 10 * 60 * 1e3;
-var pageCache = /* @__PURE__ */ new Map();
-var isCheckPage = (html) => /anubis_challenge|anubis-main/i.test(html);
-async function readPage(url, { kino: kino2, req }) {
-  const hit = pageCache.get(url);
-  if (hit && Date.now() - hit.at < PAGE_TTL_MS) return hit.html;
-  let r = null;
-  try {
-    r = await req(url, { headers: HEADERS });
-  } catch (_) {
-  }
-  let html = r && r.ok ? r.text() : null;
-  if (html && !isCheckPage(html)) return html;
-  if (!(kino2.browser && typeof kino2.browser.page === "function")) return null;
-  const ms = Math.min(PAGE_MAX_MS, req.left() - 2500);
-  if (ms < PAGE_MIN_MS) return null;
-  try {
-    const p = await kino2.browser.page(url, { waitFor: "POW_CHALLENGE", timeoutMs: ms });
-    html = p && typeof p.html === "string" ? p.html : null;
-  } catch (e) {
-    if (kino2.log) kino2.log("embed69: browser.page " + (e && e.code ? e.code : "failed") + " for " + url);
-    return null;
-  }
-  if (!html || isCheckPage(html) && !/POW_CHALLENGE/.test(html)) return null;
-  pageCache.set(url, { at: Date.now(), html });
-  return html;
-}
 async function listCopies(title, { kino: kino2, req }) {
   const path = pathFor(title);
   if (!path) return [];
-  const html = await readPage(`${SITE}/f/${path}`, { kino: kino2, req });
+  const html = await getThroughAnubis(kino2, req, `${SITE}/f/${path}`, { headers: HEADERS });
   if (!html) return [];
   const data = /let\s+dataLink\s*=\s*(\[.+\]);/.exec(html);
-  const challenge = quoted(html, "POW_CHALLENGE"), salt = quoted(html, "POW_SALT");
-  const difficulty = Number((/POW_DIFFICULTY\s*=\s*(\d+)/.exec(html) || [])[1]);
-  if (!data || !challenge || salt == null || !Number.isInteger(difficulty)) return [];
+  const challenge = quoted(html, "LINK_CHALLENGE"), salt = quoted(html, "LINK_SALT");
+  if (!data || !challenge || salt == null) return [];
   let langs;
   try {
     langs = JSON.parse(data[1]);
   } catch (_) {
     return [];
   }
-  if (difficulty > MAX_DIFFICULTY) return [];
-  const n = solvePow(kino2, challenge, difficulty);
-  if (n == null) return [];
-  const keyHex = kino2.crypto.hash("sha256", challenge + n + salt);
+  const keyHex = kino2.crypto.hash("sha256", challenge + salt);
   const out = [];
   for (const l of langs) {
     const lang = normLang(l && l.video_language);
@@ -353,15 +98,28 @@ async function listCopies(title, { kino: kino2, req }) {
       if (!e || e.servername === "download" || typeof e.link !== "string") continue;
       let url;
       try {
-        url = decryptLink(kino2, keyHex, e.link);
+        url = decryptLink(kino2, keyHex, e.link).replace(/`/g, "").trim();
       } catch (_) {
         continue;
       }
-      const known = /^https?:\/\//i.test(url) ? extractorFor(url) : null;
-      if (known && !out.some((c) => c.embedUrl === url)) out.push({ lang, server: known.name, embedUrl: url });
+      if (/^https?:\/\//i.test(url) && !out.some((c) => c.embedUrl === url)) out.push({ lang, server: String(e.servername || ""), embedUrl: url });
     }
   }
   return out;
+}
+
+// src/util/http.js
+var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+var REQUEST_MS = 8e3;
+var MIN_MS = 1500;
+function makeReq(kino2, { deadline }) {
+  const req = async (url, opts = {}) => {
+    const left = deadline - Date.now();
+    if (left < MIN_MS) throw kino2.error("timeout", "no time left for " + new URL(url).hostname);
+    return kino2.fetch(url, { headers: { "User-Agent": UA, ...opts.headers || {} }, method: opts.method, body: opts.body, timeoutMs: Math.min(REQUEST_MS, left) });
+  };
+  req.left = () => Math.max(0, deadline - Date.now());
+  return req;
 }
 
 // src/plugin.js
@@ -372,6 +130,9 @@ var TMDB_IMG = "https://image.tmdb.org/t/p/";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var RESOLVE_MS = 4e4;
 var MAX_COPIES = 8;
+var MAX_CAPTURES = 1;
+var CAPTURE_MS = 2e4;
+var HLS = "application/vnd.apple.mpegurl";
 var STRINGS = {
   es: {
     unavailable: "El servicio no est\xE1 disponible en este momento.",
@@ -639,15 +400,30 @@ function toStream(s, c) {
   if (Number.isFinite(s.durationMs) && s.durationMs > 0) out.durationMs = Math.round(s.durationMs);
   return out;
 }
-async function open(c, req) {
-  const ex = extractorFor(c.embedUrl);
-  if (!ex) return null;
+async function open(c, req, budget) {
   try {
-    const s = await ex.extract(c.embedUrl, req, kino);
-    if (s && s.gone) return GONE;
-    return s && typeof s.url === "string" && s.url ? toStream(s, c) : null;
+    const res = await kino.plugins.call("resolver", "resolve", { url: c.embedUrl, referer: SITE + "/" });
+    const s = (res && Array.isArray(res.streams) ? res.streams : []).find((x) => x && x.url);
+    if (s) {
+      const headers = {};
+      if (s.referer) headers.Referer = s.referer;
+      if (Array.isArray(s.headers)) {
+        for (const h of s.headers) if (h && h.name) headers[h.name] = String(h.value);
+      }
+      return toStream({ url: s.url, headers, mime: s.kind === "hls" ? HLS : /\.mp4(\?|$)/i.test(s.url) ? "video/mp4" : HLS, subtitles: res.subtitles, durationMs: s.durationMs }, c);
+    }
+  } catch (_) {
+  }
+  if (!kino.browser || typeof kino.browser.capture !== "function" || !budget || budget.captures <= 0) return null;
+  budget.captures -= 1;
+  try {
+    const page = await kino.browser.capture(c.embedUrl, { timeoutMs: CAPTURE_MS, match: "\\.m3u8|\\.mp4", headers: { Referer: SITE + "/" } });
+    const media = page && page.media || [];
+    const best = media.find((x) => /m3u8/i.test(x.url)) || media[0];
+    if (!best) return null;
+    return toStream({ url: best.url, headers: best.headers || { Referer: c.embedUrl }, mime: best.mime || (/\.mp4/i.test(best.url) ? "video/mp4" : HLS) }, c);
   } catch (e) {
-    kino.log("[embed69]", c.server, e && e.code || "extract_failed");
+    kino.log("[embed69] capture", e && e.code || "failed");
     return null;
   }
 }
@@ -670,37 +446,24 @@ async function resolve(ref) {
     const want = parseCopyRef(ref);
     if (!want) throw kino.error("not_found", "bad copy ref");
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
-    const stream = copy ? await open(copy, req) : null;
-    if (stream === GONE) throw kino.error("not_found", "copy gone: " + want.lang + "/" + want.server, { userMessage: t("gone") });
+    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES }) : null;
     if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
     return stream;
   }
   const title = await titleOf(ref);
   const copies = ordered(await listCopies(title, { kino, req }));
   if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t("noStreams") });
+  const budget = { captures: MAX_CAPTURES };
   let main = null;
-  let tried = 0;
-  const goneLangs = /* @__PURE__ */ new Set();
-  let timedOut = false;
   for (const c of copies) {
-    if (goneLangs.has(c.lang)) continue;
-    tried++;
-    const r = await open(c, req);
-    if (r === GONE) {
-      goneLangs.add(c.lang);
-      continue;
-    }
+    const r = await open(c, req, budget);
     if (r) {
       main = r;
       break;
     }
-    timedOut = true;
   }
-  if (!main) {
-    const everyOneGone = goneLangs.size > 0 && !timedOut;
-    throw kino.error("not_found", (everyOneGone ? "links gone for " : "no copy opened for ") + title.imdbId, { userMessage: t(everyOneGone ? "gone" : "noStreams") });
-  }
-  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1).filter((c) => !goneLangs.has(c.lang));
+  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
+  const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1);
   const alternatives = rest.slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
   return { ...main, ...alternatives.length ? { alternatives } : {} };
 }
