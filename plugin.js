@@ -157,7 +157,8 @@ var STRINGS = {
     cacheCleared: "Cach\xE9 de IDs vaciada.",
     lat: "Latino",
     esp: "Castellano",
-    sub: "Subtitulado"
+    sub: "Subtitulado",
+    needResolver: "Para reproducir, abre Embed69 desde el men\xFA e instala el motor de reproducci\xF3n que te pedir\xE1."
   },
   en: {
     unavailable: "The service is not available right now.",
@@ -182,7 +183,8 @@ var STRINGS = {
     cacheCleared: "ID cache cleared.",
     lat: "Latin",
     esp: "Castilian",
-    sub: "Subtitled"
+    sub: "Subtitled",
+    needResolver: "To play, open Embed69 from the menu and install the playback engine it asks for."
   }
 };
 function t(key) {
@@ -440,7 +442,58 @@ async function titleOf(ref) {
   }
   throw kino.error("not_found", "unknown ref: " + ref.slice(0, 40));
 }
+var RESOLVER_REPO = "xuper-plugin/kino-plugin-kino-resolver";
+var SUPPORT_URL = "https://ko-fi.com/xuperplugins";
+async function resolverInstalled() {
+  try {
+    await kino.plugins.call("resolver", "normalizeHost", { url: "https://probe.invalid/" });
+    return true;
+  } catch (e) {
+    return (e && e.code) !== "provider_missing";
+  }
+}
+function supportNode(device) {
+  if (device === "tv") return { type: "QrImage", value: SUPPORT_URL, size: "large", labelText: "Si te gusta mi trabajo, escan\xE9alo y ap\xF3yame", labelTextEn: "If you like my work, scan it and support me" };
+  return { type: "ElevatedButton", key: "donate", icon: "heart", labelText: "Si te gusta mi trabajo, ap\xF3yame", labelTextEn: "If you like my work, support me", onPressed: { go: { url: { href: SUPPORT_URL } } } };
+}
+function installGateView(device) {
+  return {
+    type: "Scaffold",
+    key: "embed69-install",
+    body: { type: "SingleChildScrollView", key: "installScroll", children: [
+      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
+        { type: "Text", text: "Necesitas el motor de reproducci\xF3n", textEn: "You need the playback engine", style: "h3" },
+        { type: "Text", color: "secondary", text: "Embed69 reproduce a trav\xE9s de Kino Resolver (gratis). Inst\xE1lalo una vez y sirve para este y para otros plugins de sitios.", textEn: "Embed69 plays through Kino Resolver (free). Install it once and it works here and in other site plugins." },
+        { type: "ElevatedButton", key: "installResolver", labelText: "Instalar Kino Resolver", labelTextEn: "Install Kino Resolver", onPressed: { go: { installPlugin: { repo: RESOLVER_REPO } } } },
+        supportNode(device)
+      ] }
+    ] }
+  };
+}
+function readyView(device) {
+  return {
+    type: "Scaffold",
+    key: "embed69-ready",
+    body: { type: "SingleChildScrollView", key: "readyScroll", children: [
+      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
+        { type: "Text", text: "Todo listo", textEn: "All set", style: "h3" },
+        { type: "Text", color: "secondary", text: "Explora Embed69 desde el inicio de Kino o busca un t\xEDtulo.", textEn: "Browse Embed69 from Kino's home, or search for a title." },
+        supportNode(device)
+      ] }
+    ] }
+  };
+}
+async function screen(ctx) {
+  await null;
+  const c = ctx && typeof ctx === "object" ? ctx : {};
+  return c.installed && c.installed[RESOLVER_REPO] ? readyView(c.device) : installGateView(c.device);
+}
+async function screenEvent() {
+  await null;
+  return {};
+}
 async function resolve(ref) {
+  if (!await resolverInstalled()) throw kino.error("unavailable", "resolver missing", { userMessage: t("needResolver") });
   const req = makeReq(kino, { deadline: Date.now() + RESOLVE_MS });
   if (ref.startsWith("cp:")) {
     const want = parseCopyRef(ref);
@@ -482,5 +535,7 @@ export {
   episodes,
   home,
   resolve,
+  screen,
+  screenEvent,
   search
 };

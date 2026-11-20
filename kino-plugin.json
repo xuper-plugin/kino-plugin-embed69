@@ -1,7 +1,7 @@
 {
  "id": "embed69",
  "name": "Embed 69",
- "version": "1.3.0",
+ "version": "1.3.1",
  "apiVersion": 20,
  "entry": "plugin.js",
  "icon": "icon.png",
@@ -36,7 +36,8 @@
   "browse",
   "episodes",
   "resolve",
-  "download"
+  "download",
+  "screen"
  ],
  "categories": [
   "movies",
@@ -104,5 +105,20 @@
  },
  "recommends": [
   "xuper-plugin/kino-plugin-kino-resolver"
- ]
+ ],
+ "screen": {
+  "label": "Embed69",
+  "labelEn": "Embed69",
+  "icon": "movie",
+  "menuOpens": "screen",
+  "opensFrom": [
+   "menu",
+   "settings"
+  ],
+  "settingsButton": {
+   "label": "Abrir Embed69",
+   "labelEn": "Open Embed69"
+  },
+  "settingsIn": "screen"
+ }
 }

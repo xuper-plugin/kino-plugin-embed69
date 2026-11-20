@@ -54,6 +54,7 @@ const STRINGS = {
     lat: "Latino",
     esp: "Castellano",
     sub: "Subtitulado",
+    needResolver: "Para reproducir, abre Embed69 desde el menú e instala el motor de reproducción que te pedirá.",
   },
   en: {
     unavailable: "The service is not available right now.",
@@ -79,6 +80,7 @@ const STRINGS = {
     lat: "Latin",
     esp: "Castilian",
     sub: "Subtitled",
+    needResolver: "To play, open Embed69 from the menu and install the playback engine it asks for.",
   },
 };
 
@@ -382,7 +384,63 @@ async function titleOf(ref) {
   throw kino.error("not_found", "unknown ref: " + ref.slice(0, 40));
 }
 
+// ---- Kino Resolver install gate ----
+
+const RESOLVER_REPO = "xuper-plugin/kino-plugin-kino-resolver";
+const SUPPORT_URL = "https://ko-fi.com/xuperplugins";
+
+/** True when the shared kino-resolver is installed (a cheap door probe; only provider_missing means "not installed"). */
+async function resolverInstalled() {
+  try { await kino.plugins.call("resolver", "normalizeHost", { url: "https://probe.invalid/" }); return true; }
+  catch (e) { return (e && e.code) !== "provider_missing"; }
+}
+
+/** The donate affordance under every install button: a QR on TV (a TV can't open a link well), a heart button on phone/desktop. */
+function supportNode(device) {
+  if (device === "tv") return { type: "QrImage", value: SUPPORT_URL, size: "large", labelText: "Si te gusta mi trabajo, escanéalo y apóyame", labelTextEn: "If you like my work, scan it and support me" };
+  return { type: "ElevatedButton", key: "donate", icon: "heart", labelText: "Si te gusta mi trabajo, apóyame", labelTextEn: "If you like my work, support me", onPressed: { go: { url: { href: SUPPORT_URL } } } };
+}
+
+/** The install gate: the first screen while the shared kino-resolver (the engine Embed69 plays through) is not installed. The
+ *  donate button sits under the install button, as on every gate. */
+function installGateView(device) {
+  return { type: "Scaffold", key: "embed69-install",
+    body: { type: "SingleChildScrollView", key: "installScroll", children: [
+      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
+        { type: "Text", text: "Necesitas el motor de reproducción", textEn: "You need the playback engine", style: "h3" },
+        { type: "Text", color: "secondary", text: "Embed69 reproduce a través de Kino Resolver (gratis). Instálalo una vez y sirve para este y para otros plugins de sitios.", textEn: "Embed69 plays through Kino Resolver (free). Install it once and it works here and in other site plugins." },
+        { type: "ElevatedButton", key: "installResolver", labelText: "Instalar Kino Resolver", labelTextEn: "Install Kino Resolver", onPressed: { go: { installPlugin: { repo: RESOLVER_REPO } } } },
+        supportNode(device),
+      ] },
+    ] },
+  };
+}
+
+/** Once the resolver is installed: a short landing that points to Home/search, with the donate button under it. */
+function readyView(device) {
+  return { type: "Scaffold", key: "embed69-ready",
+    body: { type: "SingleChildScrollView", key: "readyScroll", children: [
+      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
+        { type: "Text", text: "Todo listo", textEn: "All set", style: "h3" },
+        { type: "Text", color: "secondary", text: "Explora Embed69 desde el inicio de Kino o busca un título.", textEn: "Browse Embed69 from Kino's home, or search for a title." },
+        supportNode(device),
+      ] },
+    ] },
+  };
+}
+
+/** `screen(ctx)`: the install gate while the resolver is missing, a short landing once it is there. */
+export async function screen(ctx) {
+  await null;
+  const c = ctx && typeof ctx === "object" ? ctx : {};
+  return c.installed && c.installed[RESOLVER_REPO] ? readyView(c.device) : installGateView(c.device);
+}
+
+/** `screenEvent(ev)`: the gate is static, so there are no events to handle. */
+export async function screenEvent() { await null; return {}; }
+
 export async function resolve(ref) {
+  if (!(await resolverInstalled())) throw kino.error("unavailable", "resolver missing", { userMessage: t("needResolver") });
   const req = makeReq(kino, { deadline: Date.now() + RESOLVE_MS });
 
   // One copy picked from the Servidor menu (or reached by the automatic fallback): just that one

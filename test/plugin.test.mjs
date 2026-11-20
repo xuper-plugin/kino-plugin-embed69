@@ -15,6 +15,7 @@ let metaImpl = async () => null;
 let pages = {};          // url -> { status?, body } (a function answers per request)
 let logs = [];
 let resolverImpl = () => ({ streams: [] }); // the shared kino-resolver's door, stubbed per test
+let resolverPresent = true;                 // whether the resolver is installed (what the normalizeHost probe reports)
 globalThis.kino = {
   lang: "es",
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -29,7 +30,10 @@ globalThis.kino = {
   },
   plugins: {
     call: async (name, method, arg) => {
-      if (name === "resolver" && method === "resolve") return resolverImpl(arg);
+      if (name === "resolver") {
+        if (method === "normalizeHost") { if (!resolverPresent) throw globalThis.kino.error("provider_missing", "not installed"); return {}; }
+        if (method === "resolve") return resolverImpl(arg);
+      }
       throw globalThis.kino.error("provider_missing", "no provider " + name);
     },
   },
@@ -48,7 +52,7 @@ globalThis.kino = {
 };
 const plugin = await import("../plugin.js");
 
-beforeEach(() => { calls.length = 0; tmdbCalls.length = 0; logs = []; config = {}; pages = {}; tmdbImpl = async () => ({ results: [] }); metaImpl = async () => null; resolverImpl = defaultResolver; });
+beforeEach(() => { calls.length = 0; tmdbCalls.length = 0; logs = []; config = {}; pages = {}; tmdbImpl = async () => ({ results: [] }); metaImpl = async () => null; resolverImpl = defaultResolver; resolverPresent = true; });
 
 // ---- a fake embed69.org (LINK_CHALLENGE scheme, 2026-11) ----
 
@@ -158,16 +162,31 @@ test("when the resolver opens nothing and there is no browser, the person reads 
   await assert.rejects(() => plugin.resolve("m:1"), (e) => e.code === "not_found" && e.userMessage === "No se encontraron fuentes para este título.");
 });
 
-test("when the resolver is not installed, the hidden-browser capture is the fallback and plays what the page shows", async () => {
+test("when the resolver is not installed, the person is told to install the playback engine (not a silent failure)", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL);
+  resolverPresent = false;
+  await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "unavailable" && /motor de reproducción/.test(e.userMessage || ""));
+});
+
+test("a gate host the resolver opens nothing for is captured in the hidden browser (the resolver being installed)", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", [["LAT", [["voe", VOE("voelat")]]]]);
-  resolverImpl = () => { throw kino.error("provider_missing", "not installed"); };
+  resolverImpl = () => ({ streams: [] }); // resolver installed, but no inline stream for this host
   globalThis.kino.browser = { capture: async () => ({ media: [{ url: "https://cdn.example/v/master.m3u8" }] }) };
   try {
     const a = await plugin.resolve("m:603");
     assert.equal(a.url, "https://cdn.example/v/master.m3u8");
     assert.equal(a.label, "Latino · Voe");
   } finally { delete globalThis.kino.browser; }
+});
+
+test("the screen is the install gate until the resolver is installed, then a landing, with the donate button under install", async () => {
+  const gate = JSON.stringify(await plugin.screen({ device: "phone", installed: {} }));
+  assert.match(gate, /Instalar Kino Resolver/);
+  assert.match(gate, /installPlugin/);
+  assert.match(gate, /"key":"donate"/);
+  assert.match(JSON.stringify(await plugin.screen({ device: "phone", installed: { "xuper-plugin/kino-plugin-kino-resolver": true } })), /Todo listo|All set/);
 });
 
 test("an episode asks /f/<imdb>-<s>x<ee> and its lazy refs name season and episode", async () => {
