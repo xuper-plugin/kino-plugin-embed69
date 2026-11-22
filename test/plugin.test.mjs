@@ -94,14 +94,14 @@ test("the manifest is valid, consumes the shared resolver, and declares the site
   assert.ok(manifest.capabilities.includes("download"));
 });
 
-test("a movie asks /f/<imdb> with the partner's Referer and plays the first copy the resolver opens: Latino on StreamWish", async () => {
+test("a movie asks /f/<imdb> with the partner's Referer and plays the first copy the resolver opens: Latino on VidHide (measured fastest)", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
   const a = await plugin.resolve("m:603");
   assert.equal(calls[0].url, "https://embed69.org/f/tt0133093");
   assert.equal(calls[0].opts.headers.Referer, "https://sololatino.net/");
-  assert.equal(a.url, "https://cdn.example/swlat.m3u8");
-  assert.equal(a.label, "Latino · StreamWish");
+  assert.equal(a.url, "https://cdn.example/vhlat.m3u8");
+  assert.equal(a.label, "Latino · VidHide");
   assert.equal(a.mime, "application/vnd.apple.mpegurl");
   assert.match(a.headers["User-Agent"], /Mozilla/);
 });
@@ -119,9 +119,9 @@ test("the other copies are lazy refs, preferred language first, faster servers f
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
   const a = await plugin.resolve("m:603");
-  assert.deepEqual(a.alternatives.map((x) => x.label), ["Latino · Voe", "Latino · VidHide", "Castellano · StreamWish", "Subtitulado · StreamWish"]);
+  assert.deepEqual(a.alternatives.map((x) => x.label), ["Latino · StreamWish", "Latino · Voe", "Castellano · StreamWish", "Subtitulado · StreamWish"]);
   assert.deepEqual(a.alternatives.map((x) => x.ref), [
-    "cp:movie:tt0133093:lat:voe", "cp:movie:tt0133093:lat:vidhide", "cp:movie:tt0133093:esp:streamwish", "cp:movie:tt0133093:sub:streamwish"]);
+    "cp:movie:tt0133093:lat:streamwish", "cp:movie:tt0133093:lat:voe", "cp:movie:tt0133093:esp:streamwish", "cp:movie:tt0133093:sub:streamwish"]);
   assert.ok(a.alternatives.every((x) => x.ref.length <= 512 && !x.url));
 });
 
@@ -131,7 +131,7 @@ test("the language setting puts Castellano or Subtitulado first", async () => {
   config = { language: "esp" };
   const a = await plugin.resolve("m:603");
   assert.equal(a.label, "Castellano · StreamWish");
-  assert.equal(a.alternatives[0].label, "Latino · StreamWish");
+  assert.equal(a.alternatives[0].label, "Latino · VidHide");
   config = { language: "sub" };
   assert.equal((await plugin.resolve("m:603")).label, "Subtitulado · StreamWish");
 });
@@ -149,10 +149,42 @@ test("a lazy copy opens just that server; one the site no longer lists is not_fo
 test("a copy the resolver cannot open is skipped: the next one plays, and the one that failed is not offered again", async () => {
   metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
   serve("tt0133093", ALL);
-  resolverImpl = ({ url }) => (url === SW("swlat") ? { streams: [] } : defaultResolver({ url }));
+  resolverImpl = ({ url }) => (url === VH("vhlat") ? { streams: [] } : defaultResolver({ url }));
   const a = await plugin.resolve("m:603");
-  assert.equal(a.label, "Latino · Voe"); // StreamWish failed, Voe is next in order
-  assert.ok(!a.alternatives.some((x) => x.label === "Latino · StreamWish"), "the one that failed is not offered again");
+  assert.equal(a.label, "Latino · StreamWish"); // VidHide failed, StreamWish is next in order
+  assert.ok(!a.alternatives.some((x) => x.label === "Latino · VidHide"), "the one that failed is not offered again");
+});
+
+test("it learns which server opens for this person and tries it first next time", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", ALL);
+  const before = globalThis.kino.storage;
+  const mem = new Map();
+  globalThis.kino.storage = { get: (k) => mem.get(k) ?? null, set: (k, v) => mem.set(k, String(v)), keys: () => [...mem.keys()], remove: (k) => mem.delete(k) };
+  try {
+    // VidHide (the measured first) gives nothing twice: StreamWish plays and earns wins, VidHide losses.
+    resolverImpl = ({ url }) => (/vhlat/.test(url) ? { streams: [] } : defaultResolver({ url }));
+    assert.equal((await plugin.resolve("m:603")).label, "Latino · StreamWish");
+    assert.equal((await plugin.resolve("m:603")).label, "Latino · StreamWish");
+    // Now every server would open; the learned order asks StreamWish first instead of VidHide.
+    resolverImpl = defaultResolver;
+    calls.length = 0;
+    const a = await plugin.resolve("m:603");
+    assert.equal(a.label, "Latino · StreamWish", "the server that has opened is tried first");
+  } finally { globalThis.kino.storage = before; }
+});
+
+test("a file the resolver reports dead is not sent to the hidden browser (no 20 s wasted on a deleted upload)", async () => {
+  metaImpl = async () => ({ ids: { imdb: "tt0133093" } });
+  serve("tt0133093", [["LAT", [["voe", VOE("voelat")], ["streamwish", SW("swlat")]]]]);
+  resolverImpl = ({ url }) => (/voelat/.test(url) ? { streams: [], error: "dead" } : { streams: [] });
+  const captured = [];
+  globalThis.kino.browser = { capture: async (u) => { captured.push(u); return { media: [] }; } };
+  try {
+    await assert.rejects(() => plugin.resolve("m:603"), (e) => e.code === "not_found");
+    assert.ok(!captured.some((u) => /voelat/.test(u)), "the dead VOE upload is never captured");
+    assert.equal(captured.length, 1, "the one capture of the budget went to StreamWish, and a failed capture still spends it");
+  } finally { delete globalThis.kino.browser; }
 });
 
 test("when the resolver opens nothing and there is no browser, the person reads a readable error", async () => {
@@ -202,7 +234,7 @@ test("an episode asks /f/<imdb>-<s>x<ee> and its lazy refs name season and episo
   serve("tt0903747-2x05", ALL);
   const a = await plugin.resolve("ep:tt0903747:2:5");
   assert.equal(calls[0].url, "https://embed69.org/f/tt0903747-2x05");
-  assert.equal(a.alternatives[0].ref, "cp:ep:tt0903747:2:5:lat:voe");
+  assert.equal(a.alternatives[0].ref, "cp:ep:tt0903747:2:5:lat:streamwish");
   const lazy = await plugin.resolve("cp:ep:tt0903747:2:5:esp:streamwish");
   assert.equal(lazy.url, "https://cdn.example/swesp.m3u8");
 });
@@ -244,8 +276,8 @@ test("when the site answers its Anubis check page, the background solver passes 
   };
   const a = await plugin.resolve("m:604");
   assert.ok(calls.some((c) => /pass-challenge/.test(c.url)), "the solver posted the proof of work");
-  assert.equal(a.url, "https://cdn.example/swlat.m3u8");
-  assert.equal(a.label, "Latino · StreamWish");
+  assert.equal(a.url, "https://cdn.example/vhlat.m3u8");
+  assert.equal(a.label, "Latino · VidHide");
 });
 
 test("Anubis the solver cannot pass ends in not_found instead of crashing", async () => {

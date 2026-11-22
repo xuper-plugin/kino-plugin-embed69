@@ -1480,14 +1480,53 @@ async function episodes(ref) {
   };
 }
 var SERVER_LABEL = { streamwish: "StreamWish", vidhide: "VidHide", voe: "Voe" };
-var SERVER_ORDER = ["streamwish", "voe", "vidhide"];
+var SERVER_ORDER = ["vidhide", "streamwish", "voe"];
+var STATS_KEY = "srvStats";
+var STATS_CAP = 24;
+function readStats() {
+  try {
+    const o = JSON.parse(kino.storage.get(STATS_KEY) || "{}");
+    return o && typeof o === "object" ? o : {};
+  } catch (_) {
+    return {};
+  }
+}
+function scoreOf(id, stats) {
+  const s = stats[id] || { ok: 0, fail: 0 };
+  return (s.ok + 1) / (s.ok + s.fail + 2);
+}
+function noteServer(id, ok) {
+  try {
+    const stats = readStats();
+    const s = stats[id] || { ok: 0, fail: 0 };
+    s[ok ? "ok" : "fail"] += 1;
+    if (s.ok + s.fail > STATS_CAP) {
+      s.ok = Math.round(s.ok / 2);
+      s.fail = Math.round(s.fail / 2);
+    }
+    stats[id] = s;
+    kino.storage.set(STATS_KEY, JSON.stringify(stats));
+  } catch (_) {
+  }
+}
+var CAPTURE_PAGE_MS = CAPTURE_MS + 3e3;
+function takeCapture(budget) {
+  if (!budget || budget.captures <= 0 || budget.deadline && budget.deadline - Date.now() < CAPTURE_PAGE_MS) return false;
+  budget.captures -= 1;
+  return true;
+}
 function languageOrder() {
   const pref = String(kino.config.get("language") || "lat");
   return pref === "esp" ? ["esp", "lat", "sub"] : pref === "sub" ? ["sub", "lat", "esp"] : ["lat", "esp", "sub"];
 }
 function ordered(copies) {
   const langs = languageOrder();
-  const rank = (c) => langs.indexOf(c.lang) * 10 + Math.max(0, SERVER_ORDER.indexOf(c.server));
+  const stats = readStats();
+  const order = (s) => {
+    const i = SERVER_ORDER.indexOf(s);
+    return i < 0 ? SERVER_ORDER.length : i;
+  };
+  const rank = (c) => Math.max(0, langs.indexOf(c.lang)) * 100 + (1 - scoreOf(c.server, stats)) * 20 + order(c.server);
   return [...copies].sort((a, b) => rank(a) - rank(b));
 }
 var labelOf = (c) => `${t2(c.lang)} \xB7 ${SERVER_LABEL[c.server] || c.server}`;
@@ -1520,10 +1559,10 @@ async function open(c, req, budget) {
       }
       return toStream({ url: s.url, headers, mime: s.kind === "hls" ? HLS : /\.mp4(\?|$)/i.test(s.url) ? "video/mp4" : HLS, subtitles: res.subtitles, durationMs: s.durationMs }, c);
     }
+    if (res && res.error === "dead") return null;
   } catch (_) {
   }
-  if (!kino.browser || typeof kino.browser.capture !== "function" || !budget || budget.captures <= 0) return null;
-  budget.captures -= 1;
+  if (!kino.browser || typeof kino.browser.capture !== "function" || !takeCapture(budget)) return null;
   try {
     const page = await kino.browser.capture(c.embedUrl, { timeoutMs: CAPTURE_MS, match: "\\.m3u8|\\.mp4", headers: { Referer: SITE + "/" } });
     const media = page && page.media || [];
@@ -1598,17 +1637,19 @@ async function resolve(ref) {
     const want = parseCopyRef(ref);
     if (!want) throw kino.error("not_found", "bad copy ref");
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
-    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES }) : null;
+    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS }) : null;
+    if (copy) noteServer(copy.server, !!stream);
     if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t2("noStreams") });
     return stream;
   }
   const title = await titleOf(ref);
   const copies = ordered(await listCopies(title, { kino, req }));
   if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t2("noStreams") });
-  const budget = { captures: MAX_CAPTURES };
+  const budget = { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS };
   let main = null;
   for (const c of copies) {
     const r = await open(c, req, budget);
+    noteServer(c.server, !!r);
     if (r) {
       main = r;
       break;

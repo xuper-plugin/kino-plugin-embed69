@@ -316,10 +316,39 @@ export async function episodes(ref) {
 
 const SERVER_LABEL = { streamwish: "StreamWish", vidhide: "VidHide", voe: "Voe" };
 /**
- * Fastest first: StreamWish is one request; Voe goes through the hidden browser (a few seconds); VidHide is last because its
- * host answered slowest, timing out at 8 s on a phone (measured on a Redmi).
+ * Fastest first, measured live on 2026-11-22 (4 titles, 33 copies, through kino-resolver 0.0.20): VidHide opened 11/11 in ~1.3 s,
+ * StreamWish 11/11 in ~3.1 s, VOE 0/11 inline (it asks the visitor to prove they are human, so it only plays through the
+ * hidden browser, ~20 s). VidHide used to be last because its old domain (vidhidefast) timed out; the resolver now reaches it
+ * through a live mirror. This is the starting order: the learned score below moves the servers that open for this person up.
  */
-const SERVER_ORDER = ["streamwish", "voe", "vidhide"];
+const SERVER_ORDER = ["vidhide", "streamwish", "voe"];
+
+// ---- learned server reliability (kept in storage; inside a language, the server that opens for this person is tried first) ----
+const STATS_KEY = "srvStats";
+const STATS_CAP = 24; // halve the counts past this, so a server that recovers climbs back
+function readStats() { try { const o = JSON.parse(kino.storage.get(STATS_KEY) || "{}"); return o && typeof o === "object" ? o : {}; } catch (_) { return {}; } }
+/** Laplace-smoothed success rate of a server (unknown = 0.5). */
+function scoreOf(id, stats) { const s = stats[id] || { ok: 0, fail: 0 }; return (s.ok + 1) / (s.ok + s.fail + 2); }
+/** Record that a server opened (ok=true) or not; never throws. */
+function noteServer(id, ok) {
+  try {
+    const stats = readStats();
+    const s = stats[id] || { ok: 0, fail: 0 };
+    s[ok ? "ok" : "fail"] += 1;
+    if (s.ok + s.fail > STATS_CAP) { s.ok = Math.round(s.ok / 2); s.fail = Math.round(s.fail / 2); }
+    stats[id] = s;
+    kino.storage.set(STATS_KEY, JSON.stringify(stats));
+  } catch (_) { /* the stats are a nicety */ }
+}
+
+// A capture costs up to 20 s whether or not it finds the video: spend the budget on the attempt, and only start one if a whole
+// page still fits before this resolve's deadline.
+const CAPTURE_PAGE_MS = CAPTURE_MS + 3000;
+function takeCapture(budget) {
+  if (!budget || budget.captures <= 0 || (budget.deadline && budget.deadline - Date.now() < CAPTURE_PAGE_MS)) return false;
+  budget.captures -= 1;
+  return true;
+}
 
 /** The languages in the order the person prefers them (the "language" setting), the other two after it. */
 function languageOrder() {
@@ -327,10 +356,13 @@ function languageOrder() {
   return pref === "esp" ? ["esp", "lat", "sub"] : pref === "sub" ? ["sub", "lat", "esp"] : ["lat", "esp", "sub"];
 }
 
-/** The copies, preferred language first, then the faster servers first. */
+/** The copies: preferred language first; inside a language, the server that has opened for this person (learned), then the
+ *  measured speed order. The lazy refs name lang + server, so reordering never breaks a saved copy ref. */
 function ordered(copies) {
   const langs = languageOrder();
-  const rank = (c) => langs.indexOf(c.lang) * 10 + Math.max(0, SERVER_ORDER.indexOf(c.server));
+  const stats = readStats();
+  const order = (s) => { const i = SERVER_ORDER.indexOf(s); return i < 0 ? SERVER_ORDER.length : i; };
+  const rank = (c) => Math.max(0, langs.indexOf(c.lang)) * 100 + (1 - scoreOf(c.server, stats)) * 20 + order(c.server);
   return [...copies].sort((a, b) => rank(a) - rank(b));
 }
 
@@ -372,9 +404,10 @@ async function open(c, req, budget) {
       if (Array.isArray(s.headers)) for (const h of s.headers) if (h && h.name) headers[h.name] = String(h.value);
       return toStream({ url: s.url, headers, mime: s.kind === "hls" ? HLS : (/\.mp4(\?|$)/i.test(s.url) ? "video/mp4" : HLS), subtitles: res.subtitles, durationMs: s.durationMs }, c);
     }
+    // The resolver read the hoster's page and the file is gone: a hidden browser would only find the same "deleted" page.
+    if (res && res.error === "dead") return null;
   } catch (_) { /* provider_missing / failed: the hidden browser may still reach it */ }
-  if (!kino.browser || typeof kino.browser.capture !== "function" || !budget || budget.captures <= 0) return null;
-  budget.captures -= 1;
+  if (!kino.browser || typeof kino.browser.capture !== "function" || !takeCapture(budget)) return null;
   try {
     const page = await kino.browser.capture(c.embedUrl, { timeoutMs: CAPTURE_MS, match: "\\.m3u8|\\.mp4", headers: { Referer: SITE + "/" } });
     const media = (page && page.media) || [];
@@ -465,7 +498,8 @@ export async function resolve(ref) {
     const want = parseCopyRef(ref);
     if (!want) throw kino.error("not_found", "bad copy ref");
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
-    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES }) : null;
+    const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS }) : null;
+    if (copy) noteServer(copy.server, !!stream);
     if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
     return stream;
   }
@@ -476,10 +510,11 @@ export async function resolve(ref) {
 
   // The first copy that opens plays; the rest are lazy copies, opened only if the person (or the fallback) reaches them. One
   // capture is shared across the attempt, so a title whose hosts are all gated still tries one in the hidden browser.
-  const budget = { captures: MAX_CAPTURES };
+  const budget = { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS };
   let main = null;
   for (const c of copies) {
     const r = await open(c, req, budget);
+    noteServer(c.server, !!r); // learn which server opens, for next time
     if (r) { main = r; break; }
   }
   if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
