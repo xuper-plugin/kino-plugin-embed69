@@ -70,15 +70,15 @@ test("bar without a logo still has the name", async () => {
 /** The ui operations of an action, as "op:key" strings. */
 const ops = (action) => (action && action.ui ? action.ui.map((o) => Object.entries(o).map(([k, v]) => k + ":" + v)[0]) : []);
 
-test("search opens and closes in the bar locally, with no plugin call", async () => {
+test("search opens and closes in the bar at once (local ui), and tells the plugin so Back can close it", async () => {
   const tree = await make().screen({ state: {}, device: "phone", installed });
   const all = nodes(tree.appBar);
   const open = all.find((n) => n.key === "searchButton").onPressed;
-  assert.equal(open.event, undefined, "no event: Kino does it at once");
+  assert.equal(open.event, "searchRoute", "then the plugin pushes the search route, so Back pops it");
   assert.deepEqual(ops(open).sort(), ["focus:q", "hide:brand", "hide:searchButton", "hide:settingsButton", "show:closeSearch", "show:q"].sort());
   const close = all.find((n) => n.key === "closeSearch");
   assert.equal(close.icon, "arrow_back");
-  assert.equal(close.onPressed.event, undefined);
+  assert.equal(close.onPressed.event, "closeSearch");
   assert.deepEqual(ops(close.onPressed).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:brand", "show:searchButton", "show:settingsButton"].sort());
   const q = all.find((n) => n.key === "q");
   assert.equal(q.type, "TextField");
@@ -300,12 +300,13 @@ test("Kino drops nothing of any tree or answer: phone and TV, Spanish and Englis
         browse: await s.screen({ state, device, installed }),
         settings: await s.screen({ state, route: { name: "settings" }, device, installed }),
         gate: await s.screen({ state: {}, device, installed: {} }),
+        search: await s.screen({ state, route: { name: "search" }, device, installed }),
       };
       for (const [name, tree] of Object.entries(trees)) {
         const r = kit.checkScreenTree(fold(tree), lang, undefined, { apiVersion: 30, settings: SETTINGS });
         assert.deepEqual(r.dropped, [], `${device}/${lang}/${name}`);
       }
-      for (const [name, ev] of [["search", { name: "search", value: "dune", state: {}, device }], ["openSettings", { name: "openSettings", state: {} }], ["tab", { name: "tab", value: "b", state }]]) {
+      for (const [name, ev] of [["search", { name: "search", value: "dune", state: {}, device }], ["openSettings", { name: "openSettings", state: {} }], ["tab", { name: "tab", value: "b", state }], ["searchRoute", { name: "searchRoute", state, route: { name: "main" } }], ["closeSearch", { name: "closeSearch", state, route: { name: "search" } }], ["searchFromRoute", { name: "search", value: "dune", state, route: { name: "search" } }]]) {
         const r = kit.checkScreenAnswer(fold(await s.screenEvent(ev)), lang, {});
         assert.deepEqual(r.dropped, [], `${device}/${lang}/answer ${name}`);
       }
@@ -329,4 +330,57 @@ test("a row's English title reaches its rail", async () => {
   const rail = nodes(await s.screen({ state: await loaded(s), device: "phone", installed })).find((n) => n.type === "titleRail");
   assert.equal(rail.title, "Recién agregadas");
   assert.equal(rail.titleEn, "Recently added");
+});
+
+test("the search route: Back (Kino pops it) leaves the bar as it was; the tree draws the box itself", async () => {
+  const s = make();
+  // The search button's event pushes the route and drops the local ui ops, so after a pop the main tree's defaults hold.
+  assert.deepEqual(await s.screenEvent({ name: "searchRoute", state: {}, route: { name: "main" } }), { route: { push: "search" }, state: { ui: null } });
+  const bar = nodes((await s.screen({ state: {}, route: { name: "search" }, device: "phone", installed })).appBar);
+  const byKey = (k) => bar.find((n) => n.key === k);
+  assert.notEqual(byKey("q").hidden, true, "the box shows");
+  assert.notEqual(byKey("closeSearch").hidden, true, "its arrow shows");
+  assert.equal(byKey("brand").hidden, true);
+  assert.equal(byKey("searchButton").hidden, true);
+  assert.equal(byKey("q").autofocus, true);
+  // The arrow on the search route pops it; on the main route (tapped before the route arrived) it only drops the ops.
+  assert.deepEqual(await s.screenEvent({ name: "closeSearch", state: {}, route: { name: "search" } }), { route: { pop: true }, state: { ui: null } });
+  assert.deepEqual(await s.screenEvent({ name: "closeSearch", state: {}, route: { name: "main" } }), { state: { ui: null } });
+  // Searching from the route goes to Kino's search and leaves the route.
+  const done = await s.screenEvent({ name: "search", value: "dune", state: {}, route: { name: "search" } });
+  assert.deepEqual(done.go, { search: { q: "dune" } });
+  assert.deepEqual(done.route, { pop: true });
+  assert.deepEqual(done.state, { ui: null });
+});
+
+test("a tab load that hangs ends as failed (with Retry) before Kino's 20 s call limit, so the timer is not switched off", { timeout: 5000 }, async () => {
+  const s = make({ loadTab: () => new Promise(() => {}), tabTimeoutMs: 30 });
+  const r = await s.screenEvent({ name: "tick", state: { tab: "inicio", pending: ["inicio"] }, device: "phone" });
+  assert.deepEqual(r.state.failed, { inicio: true });
+  assert.deepEqual(r.state.pending, []);
+  const tree = await s.screen({ state: { tab: "inicio", failed: { inicio: true } }, device: "phone", installed });
+  assert.ok(nodes(tree).some((n) => n.type === "MaterialBanner" && n.action && n.action.onTap === "retry"));
+});
+
+test("a poster-only tab with many rails asks TMDB at most 24 titles per tick", async () => {
+  const asked = [];
+  const k = fakeKino();
+  k.meta = async (q) => { asked.push(q); return null; };
+  k.meta.byTitle = true;
+  const rows = Array.from({ length: 8 }, (_, r) => ({ id: "r" + r, title: "R" + r, items: Array.from({ length: 15 }, (_, i) => posterOnly(r * 100 + i)) }));
+  const s = make({ kino: k, loadTab: async () => ({ rows }) });
+  const state = { tab: "inicio", pending: ["inicio"] };
+  const r1 = await s.screenEvent({ name: "tick", state, device: "phone" });
+  await s.screenEvent({ name: "tick", state: { ...state, ...r1.state }, device: "phone" });
+  assert.ok(asked.length > 0 && asked.length <= 24, "asked " + asked.length);
+});
+
+test("with many tabs the kept copies share the room: each one stays small", async () => {
+  const k = fakeKino();
+  const tabs = Array.from({ length: 8 }, (_, i) => ({ id: "t" + i, label: "T" + i, labelEn: "T" + i }));
+  const rows = Array.from({ length: 8 }, (_, r) => ({ id: "r" + r, title: "R" + r, items: Array.from({ length: 20 }, (_, i) => item(r * 100 + i)) }));
+  const s = make({ kino: k, tabs, loadTab: async () => ({ rows }) });
+  await s.screenEvent({ name: "tick", state: { tab: "t0", pending: ["t0"] }, device: "phone" });
+  const kept = k.storage.get("browse1:t0");
+  assert.ok(kept && kept.length <= 12 * 1024, "kept " + (kept && kept.length));
 });
