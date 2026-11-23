@@ -1,7 +1,7 @@
 {
  "id": "embed69",
  "name": "Embed 69",
- "version": "1.6.5",
+ "version": "1.6.6",
  "apiVersion": 30,
  "entry": "plugin.js",
  "icon": "icon.png",
@@ -118,6 +118,6 @@
    "label": "Abrir Embed69",
    "labelEn": "Open Embed69"
   },
-  "settingsIn": "screen"
+  "settingsIn": "both"
  }
 }
