@@ -120,4 +120,10 @@ for (const [i, t] of source.tabs.entries()) {
   const slides = rows.find((r) => r.hidden && r.id === "slides");
   console.log(`${t.id}: ${shown.length} rows, ${shown.reduce((n, r) => n + r.items.length, 0)} titles, ${slides ? slides.items.length : 0} slides`);
 }
+// home/index.json: this plugin's tabs, in order (Da-Video's Contenido reads it to know which files to fetch). Rewritten only
+// when the tabs change, and kept even when no tab could be loaded this run.
+const indexFile = new URL("index.json", dir);
+const index = { v: std.SNAPSHOT_VERSION, tabs: source.tabs.map((t) => ({ id: t.id, label: t.label || t.id, ...(t.labelEn ? { labelEn: t.labelEn } : {}) })) };
+const oldIndex = existsSync(indexFile) ? readFileSync(indexFile, "utf8") : "";
+if (oldIndex.trim() !== JSON.stringify(index)) { writeFileSync(indexFile, JSON.stringify(index) + "\n"); console.log("index: " + index.tabs.map((t) => t.id).join(", ")); }
 process.exit(usable > 0 ? 0 : 1);
