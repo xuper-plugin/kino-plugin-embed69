@@ -128,9 +128,8 @@ function makeReq(kino2, { deadline }) {
   return req;
 }
 
-// src/browse/model.js
-var TAB_IDS = ["inicio", "peliculas", "series"];
-var MAX_SLIDES = 6;
+// src/std/model.js
+var MAX_SLIDES = 5;
 var MAX_RAILS = 8;
 var MAX_RAIL_ITEMS = 20;
 var MAX_SLIDE_TEXT = 160;
@@ -148,22 +147,26 @@ function cardOf(item) {
   return out;
 }
 function slidesOf(rows) {
+  const byBackdrop = pickSlides(rows, (item) => item.backdrop);
+  return byBackdrop.length > 0 ? byBackdrop : pickSlides(rows, (item) => item.poster);
+}
+function pickSlides(rows, pictureOf) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
   for (const row of rows) {
-    for (const item of row.items) {
+    for (const item of row.items || []) {
       if (out.length >= MAX_SLIDES) return out;
-      if (item.adult === true || seen.has(item.id) || !item.backdrop || !HTTPS.test(item.backdrop)) continue;
+      const image = pictureOf(item);
+      if (item.adult === true || seen.has(item.id) || !image || !HTTPS.test(image)) continue;
       const text = typeof item.overview === "string" ? item.overview.trim() : "";
-      if (text === "") continue;
       seen.add(item.id);
       out.push({
         id: item.id,
         ref: item.ref,
         kind: item.kind,
         title: item.title,
-        image: item.backdrop,
-        text: text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}\u2026`
+        image,
+        text: text === "" ? [item.year, item.rating ? "\u2605 " + item.rating : null].filter(Boolean).join(" \xB7 ") : text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}\u2026`
       });
     }
   }
@@ -211,584 +214,85 @@ function recentOf(keys, tabs) {
   return out;
 }
 
-// src/i18n.js
+// src/std/strings.js
 var WORDS = {
-  es: {
-    notFound: "No encontr\xE9 este t\xEDtulo en espa\xF1ol.",
-    seasonMissing: "Latino todav\xEDa no tiene la temporada {season} de {title} en espa\xF1ol.",
-    episodeMissing: "Latino todav\xEDa no tiene el cap\xEDtulo {episode} de la temporada {season} de {title} en espa\xF1ol.",
-    notInSpanish: "no disponible en espa\xF1ol",
-    sourcesDown: "Las fuentes en espa\xF1ol no responden ahora.",
-    tmdbDown: "TMDB no responde ahora. Intenta de nuevo en un rato.",
-    noPlayable: "Encontr\xE9 el t\xEDtulo, pero ninguna copia abri\xF3. Intenta de nuevo en un rato.",
-    needResolver: "Para reproducir, abre Latino desde el men\xFA e instala el motor de reproducci\xF3n que te pedir\xE1.",
-    copyFailed: "Esta copia no abri\xF3. Prueba con otro servidor.",
-    lat: "Latino",
-    esp: "Castellano",
-    sub: "Subtitulado",
-    direct: "Directo",
-    keepOneSource: "Deja al menos una fuente encendida.",
-    healthOk: "ok",
-    healthFail: "falla",
-    healthNone: "sin datos",
-    healthOff: "apagada",
-    probeDone: "Prob\xE9 las fuentes con un t\xEDtulo de prueba: {ok} responden, {fail} fallan.",
-    probeNoTmdb: "No pude consultar TMDB para la prueba. Intenta de nuevo en un rato.",
-    probeNone: "No hay fuentes encendidas para probar.",
-    cacheCleared: "Listo: borr\xE9 {n} datos guardados.",
-    cacheClearedOne: "Listo: borr\xE9 1 dato guardado.",
-    prefsReset: "Restablec\xED tus preferencias.",
-    rowMovies: "Estrenos en latino",
-    rowSeries: "Series en latino",
-    rowHackstore: "Reci\xE9n agregadas",
-    rowHackstoreSeries: "Series reci\xE9n agregadas",
-    panelTitle: "Latino",
-    tabCopy: "Esta copia",
-    tabSummary: "Resumen",
-    tabAvail: "Disponibilidad",
-    tabPrefs: "Preferencias",
-    tabFail: "Si falla",
-    tabError: "No se pudo cargar esta pesta\xF1a",
-    nowPlaying: "Reproduciendo ahora",
-    copyLang: "Idioma: {v}",
-    copyQuality: "Calidad: {v}",
-    copyServer: "Servidor: {v}",
-    copySite: "Fuente: {v}",
-    copyManual: "Cambiaste de copia: la elegida sola era {v}",
-    copyChosen: "Elegida entre {n} copias",
-    copyChosenOne: "Elegida entre 1 copia",
-    copyNoInfo: "Todav\xEDa no s\xE9 qu\xE9 copia suena.",
-    statResolution: "Imagen {v}",
-    statNetwork: "Red {v}",
-    statStalls: "Cortes en esta sesi\xF3n: {v}",
-    netWifi: "Wi-Fi",
-    netEthernet: "cable",
-    netCellular: "datos m\xF3viles",
-    netOther: "otra red",
-    availNoTmdb: "Este t\xEDtulo no tiene ficha para revisar",
-    availPartial: "Respuesta parcial: algunas fuentes no contestaron",
-    availSeasons: "Temporadas sin versi\xF3n en espa\xF1ol: {v}",
-    availNone: "Ninguna fuente contest\xF3 con copias de este t\xEDtulo",
-    prefPreferred: "Idioma preferido",
-    prefMaxQuality: "Calidad m\xE1xima",
-    langLat: "Latino",
-    langEsp: "Castellano",
-    langSub: "Subtitulado",
-    qAuto: "Autom\xE1tica",
-    qUpTo: "Hasta {v}",
-    qUpTo480: "Hasta 480p (ahorra datos)",
-    prefAvoid: "Evitar {v}",
-    prefAvoidHint: "Pasa al final de la lista, no se borra",
-    prefReset: "Restablecer preferencias",
-    prefResetConfirm: "\xBFVolver a tus ajustes de siempre?",
-    prefApplies: "Se aplica al abrir la pr\xF3xima copia",
-    prefSaved: "Listo: se aplica en la pr\xF3xima copia",
-    nextEp: "Siguiente: T{s} \xB7 E{e}{tail}",
-    nextSeason: "Siguiente: temporada {s}, E{e}{tail}",
-    nextEnd: "Fin de la temporada {s}",
-    nextSpanish: "en espa\xF1ol en {v}",
-    nextSubOnly: "solo subtitulado",
-    nextNone: "no encontrado en espa\xF1ol",
-    nextChecking: "comprobando\u2026",
-    prefNow: "Ahora: {v}",
-    prefFirst: "{v} primero",
-    prefUpTo: "hasta {v}",
-    prefAutoQ: "calidad autom\xE1tica",
-    prefAvoidList: "evitar: {v}",
-    failTips: "Si una copia no abre: prueba otra desde el men\xFA Servidor, revisa tu Wi-Fi o int\xE9ntalo m\xE1s tarde.",
-    availNoEpisode: "sin este cap\xEDtulo",
-    availNoTitle: "sin esta pel\xEDcula",
-    availSeasonGone: "Esta temporada no tiene versi\xF3n en espa\xF1ol",
-    prefWins: "Lo que cambies aqu\xED manda sobre Ajustes hasta que uses Restablecer (abajo)",
-    failAllGood: "Todo bien: en esta sesi\xF3n no ha fallado ninguna copia",
-    failTimeout: "El servidor tard\xF3 en contestar",
-    failNetwork: "No hubo conexi\xF3n con el servidor",
-    failNotFound: "El servidor ya no tiene esta copia",
-    failUnavailable: "El servidor no est\xE1 disponible ahora",
-    failGeneric: "La copia no abri\xF3",
-    failTried: "Copias probadas: {v}",
-    failHowTo: "Abre el men\xFA Servidor del reproductor para elegir otra copia",
-    failReport: "Avisar de esta copia",
-    failReportConfirm: "Se enviar\xE1 un aviso t\xE9cnico sin datos personales",
-    failReported: "Listo: se env\xEDa el aviso si tienes los reportes activados",
-    failAlready: "Ya avis\xE9 de esta copia en las \xFAltimas 12 horas",
-    failReportOff: "El aviso no est\xE1 activo en Ajustes",
-    stallsHint: "Se ha cortado {n} veces: mira la pesta\xF1a Si falla",
-    sumRating: "Calificaci\xF3n {v}",
-    sumCast: "Reparto: {v}",
-    tabHome: "Inicio",
-    tabMovies: "Pel\xEDculas",
-    tabSeries: "Series",
-    brWatch: "Ver",
-    dEpisodeN: "Episodio {n}",
-    dSeasonN: "Temporada {n}",
-    dSeasonsN: "{n} temporadas",
-    dSeriesGo: "Ver episodios",
-    dMore: "M\xE1s opciones",
-    dCreators: "Creaci\xF3n: {v}",
-    dDirector: "Direcci\xF3n: {v}",
-    dCast: "Reparto",
-    dEpisodes: "Episodios",
-    dSimilar: "M\xE1s como esto",
-    dSeeInKino: "Ver en Kino",
-    brMore: "Ver m\xE1s",
-    brInfo: "M\xE1s informaci\xF3n",
-    brRecent: "Continuar viendo",
-    brSearch: "Buscar",
-    brSearchHint: "Buscar en Latino",
-    brSearchTitle: "Buscar",
-    brSearchedBefore: "Buscado recientemente",
-    brNoResults: "No encontramos nada con esas palabras.",
-    brSearchFailed: "No se pudo buscar. Revisa tu conexi\xF3n e int\xE9ntalo de nuevo.",
-    brFailed: "No se pudo cargar esta secci\xF3n. Revisa tu conexi\xF3n e int\xE9ntalo de nuevo.",
-    brRetry: "Reintentar",
-    brEmpty: "A\xFAn no hay nada aqu\xED.",
-    brBack: "Atr\xE1s",
-    brClose: "Cerrar",
-    brSettings: "Configuraci\xF3n",
-    seriesGenre: "Series de {g}",
-    badge_2160p: "4K",
-    g_accion: "Acci\xF3n",
-    g_comedia: "Comedia",
-    g_drama: "Drama",
-    g_terror: "Terror",
-    g_suspense: "Suspenso",
-    g_animacion: "Animaci\xF3n",
-    g_crimen: "Crimen",
-    g_aventura: "Aventura",
-    g_romance: "Romance",
-    g_familia: "Familia",
-    g_misterio: "Misterio",
-    "g_ciencia-ficcion": "Ciencia ficci\xF3n",
-    g_fantasia: "Fantas\xEDa",
-    "g_sci-fi-fantasy": "Ciencia ficci\xF3n y fantas\xEDa",
-    "g_action-adventure": "Acci\xF3n y aventura",
-    g_documental: "Documental",
-    g_historia: "Historia",
-    g_musica: "M\xFAsica",
-    g_belica: "B\xE9lica",
-    g_western: "Del Oeste",
-    g_kids: "Infantil",
-    "g_war-politics": "Guerra y pol\xEDtica",
-    g_reality: "Reality"
-  },
-  en: {
-    notFound: "I couldn't find this title in Spanish.",
-    seasonMissing: "Latino doesn't have season {season} of {title} in Spanish yet.",
-    episodeMissing: "Latino doesn't have episode {episode} of season {season} of {title} in Spanish yet.",
-    notInSpanish: "not available in Spanish",
-    sourcesDown: "The Spanish sources aren't answering right now.",
-    tmdbDown: "TMDB isn't answering right now. Try again in a while.",
-    noPlayable: "I found the title, but no copy opened. Try again in a while.",
-    needResolver: "To play, open Latino from the menu and install the playback engine it asks for.",
-    copyFailed: "This copy didn't open. Try another server.",
-    lat: "Latin Spanish",
-    esp: "Spain Spanish",
-    sub: "Subtitled",
-    direct: "Direct",
-    keepOneSource: "Keep at least one source on.",
-    healthOk: "ok",
-    healthFail: "fails",
-    healthNone: "no data",
-    healthOff: "off",
-    probeDone: "Tested the sources with a sample title: {ok} answer, {fail} fail.",
-    probeNoTmdb: "I couldn't reach TMDB for the test. Try again in a while.",
-    probeNone: "No sources are on to test.",
-    cacheCleared: "Done: cleared {n} saved items.",
-    cacheClearedOne: "Done: cleared 1 saved item.",
-    prefsReset: "Your preferences are back to the defaults.",
-    rowMovies: "New in Latin Spanish",
-    rowSeries: "Series in Latin Spanish",
-    rowHackstore: "Just added",
-    rowHackstoreSeries: "Series just added",
-    panelTitle: "Latino",
-    tabCopy: "This copy",
-    tabSummary: "Summary",
-    tabAvail: "Availability",
-    tabPrefs: "Preferences",
-    tabFail: "If it fails",
-    tabError: "This tab couldn't load",
-    nowPlaying: "Playing now",
-    copyLang: "Language: {v}",
-    copyQuality: "Quality: {v}",
-    copyServer: "Server: {v}",
-    copySite: "Source: {v}",
-    copyManual: "You switched copies: the automatic pick was {v}",
-    copyChosen: "Chosen from {n} copies",
-    copyChosenOne: "Chosen among 1 copy",
-    copyNoInfo: "I don't know yet which copy is playing.",
-    statResolution: "Picture {v}",
-    statNetwork: "Network {v}",
-    statStalls: "Stalls this session: {v}",
-    netWifi: "Wi-Fi",
-    netEthernet: "wired",
-    netCellular: "mobile data",
-    netOther: "other network",
-    availNoTmdb: "This title has no page to check",
-    availPartial: "Partial answer: some sources did not reply",
-    availSeasons: "Seasons without a Spanish version: {v}",
-    availNone: "No source answered with copies of this title",
-    prefPreferred: "Preferred language",
-    prefMaxQuality: "Maximum quality",
-    langLat: "Latin Spanish",
-    langEsp: "Castilian",
-    langSub: "Subtitled",
-    qAuto: "Automatic",
-    qUpTo: "Up to {v}",
-    qUpTo480: "Up to 480p (saves data)",
-    prefAvoid: "Avoid {v}",
-    prefAvoidHint: "Moves to the end of the list, never removed",
-    prefReset: "Reset preferences",
-    prefResetConfirm: "Go back to your usual settings?",
-    prefApplies: "Applies when the next copy opens",
-    prefSaved: "Done: applies on the next copy",
-    nextEp: "Next: S{s} \xB7 E{e}{tail}",
-    nextSeason: "Next: season {s}, E{e}{tail}",
-    nextEnd: "End of season {s}",
-    nextSpanish: "in Spanish on {v}",
-    nextSubOnly: "subtitled only",
-    nextNone: "not found in Spanish",
-    nextChecking: "checking\u2026",
-    prefNow: "Now: {v}",
-    prefFirst: "{v} first",
-    prefUpTo: "up to {v}",
-    prefAutoQ: "automatic quality",
-    prefAvoidList: "avoid: {v}",
-    failTips: "If a copy won't open: try another from the Server menu, check your Wi-Fi or try again later.",
-    availNoEpisode: "no copy of this episode",
-    availNoTitle: "no copy of this film",
-    availSeasonGone: "This season has no Spanish version",
-    prefWins: "What you change here beats Settings until you use Reset (below)",
-    failAllGood: "All good: no copy has failed in this session",
-    failTimeout: "The server took too long to answer",
-    failNetwork: "There was no connection to the server",
-    failNotFound: "The server no longer has this copy",
-    failUnavailable: "The server isn't available right now",
-    failGeneric: "The copy didn't open",
-    failTried: "Copies tried: {v}",
-    failHowTo: "Open the player's Server menu to pick another copy",
-    failReport: "Report this copy",
-    failReportConfirm: "A technical notice with no personal data will be sent",
-    failReported: "Done: the notice is sent if you have reports turned on",
-    failAlready: "I already reported this copy in the last 12 hours",
-    failReportOff: "Reporting isn't turned on in Settings",
-    stallsHint: 'Playback has stalled {n} times: see the "If it fails" tab',
-    sumRating: "Rating {v}",
-    sumCast: "Cast: {v}",
-    tabHome: "Home",
-    tabMovies: "Movies",
-    tabSeries: "Series",
-    brWatch: "Watch",
-    dEpisodeN: "Episode {n}",
-    dSeasonN: "Season {n}",
-    dSeasonsN: "{n} seasons",
-    dSeriesGo: "Watch episodes",
-    dMore: "More options",
-    dCreators: "Created by: {v}",
-    dDirector: "Directed by: {v}",
-    dCast: "Cast",
-    dEpisodes: "Episodes",
-    dSimilar: "More like this",
-    dSeeInKino: "Open in Kino",
-    brMore: "See more",
-    brInfo: "More info",
-    brRecent: "Continue watching",
-    brSearch: "Search",
-    brSearchHint: "Search Latino",
-    brSearchTitle: "Search",
-    brSearchedBefore: "Recently searched",
-    brNoResults: "Nothing matched those words.",
-    brSearchFailed: "The search failed. Check your connection and try again.",
-    brFailed: "This section could not be loaded. Check your connection and try again.",
-    brRetry: "Retry",
-    brEmpty: "Nothing here yet.",
-    brBack: "Back",
-    brClose: "Close",
-    brSettings: "Settings",
-    seriesGenre: "{g} series",
-    badge_2160p: "4K",
-    g_accion: "Action",
-    g_comedia: "Comedy",
-    g_drama: "Drama",
-    g_terror: "Horror",
-    g_suspense: "Thriller",
-    g_animacion: "Animation",
-    g_crimen: "Crime",
-    g_aventura: "Adventure",
-    g_romance: "Romance",
-    g_familia: "Family",
-    g_misterio: "Mystery",
-    "g_ciencia-ficcion": "Science fiction",
-    g_fantasia: "Fantasy",
-    "g_sci-fi-fantasy": "Sci-fi and fantasy",
-    "g_action-adventure": "Action and adventure",
-    g_documental: "Documentary",
-    g_historia: "History",
-    g_musica: "Music",
-    g_belica: "War",
-    g_western: "Western",
-    g_kids: "Kids",
-    "g_war-politics": "War and politics",
-    g_reality: "Reality"
-  }
+  watch: ["Ver", "Watch"],
+  info: ["M\xE1s informaci\xF3n", "More info"],
+  recent: ["Continuar viendo", "Continue watching"],
+  search: ["Buscar", "Search"],
+  searchHint: ["Buscar en {name}", "Search {name}"],
+  failed: ["No se pudo cargar esta secci\xF3n. Revisa tu conexi\xF3n e int\xE9ntalo de nuevo.", "This section could not be loaded. Check your connection and try again."],
+  retry: ["Reintentar", "Retry"],
+  empty: ["A\xFAn no hay nada aqu\xED.", "Nothing here yet."],
+  back: ["Atr\xE1s", "Back"],
+  close: ["Cerrar", "Close"],
+  settings: ["Ajustes", "Settings"],
+  supportTv: ["Si te gusta mi trabajo, escan\xE9alo y ap\xF3yame", "If you like my work, scan it and support me"],
+  support: ["Si te gusta mi trabajo, ap\xF3yame", "If you like my work, support me"],
+  gateTitle: ["Necesitas el motor de reproducci\xF3n", "You need the playback engine"],
+  gateText: [
+    "{name} reproduce a trav\xE9s de Kino Resolver (gratis). Inst\xE1lalo una vez y sirve para este y para otros plugins de sitios.",
+    "{name} plays through Kino Resolver (free). Install it once and it works here and in other site plugins."
+  ],
+  gateInstall: ["Instalar Kino Resolver", "Install Kino Resolver"]
 };
-function langOf(kino2 = globalThis.kino) {
-  return String(kino2 && kino2.lang || "").toLowerCase().startsWith("en") ? "en" : "es";
+var fill = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => vars && vars[k] != null ? String(vars[k]) : m);
+function twin(key, field = "text", vars) {
+  const [es, en] = WORDS[key];
+  const pick = (i) => vars && Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, Array.isArray(v) ? v[i] : v]));
+  return { [field]: fill(es, pick(0)), [field + "En"]: fill(en, pick(1)) };
 }
-function t(key, kino2 = globalThis.kino) {
-  const words = WORDS[langOf(kino2)];
-  return words[key] ?? WORDS.es[key] ?? key;
-}
-function tf(key, vars, kino2 = globalThis.kino) {
-  return t(key, kino2).replace(/\{(\w+)\}/g, (m, k) => vars && vars[k] != null ? String(vars[k]) : m);
-}
-var both = (key, vars) => {
-  const one = (lang) => tf(key, vars && Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, typeof v === "function" ? v(lang) : v])), { lang });
-  return { es: one("es"), en: one("en") };
-};
-var KEYS = { es: Object.keys(WORDS.es), en: Object.keys(WORDS.en) };
+var STRING_KEYS = Object.keys(WORDS);
 
-// src/browse/detail.js
-var HTTPS2 = /^https:\/\//;
-var MAX_EPISODES = 80;
-var MAX_CAST = 12;
-var LEAD_MAX = 140;
-var TMDB_IMG = "https://image.tmdb.org/t/p/w342";
-var twin = (key, field = "text", vars) => {
-  const w = both(key, vars);
-  return { [field]: w.es, [field + "En"]: w.en };
-};
-var same = (text) => ({ text, textEn: text });
-var num = (v) => {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : 0;
-};
-var https = (v) => typeof v === "string" && HTTPS2.test(v) && v.length <= 2048 ? v : void 0;
-var opensPage = (card) => !!card && (card.kind === "movie" || card.kind === "series") && typeof card.ref === "string" && card.ref.length < 600 && typeof card.id === "string";
-var cardNode = (card, size, scope) => ({
-  type: "titleCard",
-  key: `${scope}-${card.id}`,
-  size,
-  item: card,
-  ...opensPage(card) ? { onTap: { go: { title: { ref: card.ref, kind: card.kind, id: card.id, title: card.title } } } } : {}
-});
-var cardRow = (items, key, size) => ({ type: "SingleChildScrollView", key: key + "-s", direction: "horizontal", children: [{ type: "Row", key: key + "-r", gap: 12, children: items.map((c) => cardNode(c, size, key)) }] });
-function pushOf(arg) {
-  let a = null;
-  try {
-    a = JSON.parse(String(arg));
-  } catch (_) {
-    a = null;
-  }
-  if (!a || typeof a.open !== "string" || typeof a.i !== "string" || a.k !== "movie" && a.k !== "series") return null;
-  return { push: "detail", params: { open: a.open, i: a.i, t: typeof a.t === "string" ? a.t.slice(0, 100) : "", k: a.k, d: Number(a.d) || 0, y: Number(a.y) || 0 } };
-}
-function backdropsOf(images, first) {
-  const base = "https://image.tmdb.org/t/p/w780";
-  const list = (images && images.backdrops || []).filter((b) => b && typeof b.file_path === "string" && b.file_path.startsWith("/") && b.width >= 1e3).sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).map((b) => base + b.file_path);
-  const out = [];
-  for (const u of [first, ...list]) if (u && !out.some((x) => x.slice(x.lastIndexOf("/")) === u.slice(u.lastIndexOf("/")))) out.push(u);
-  return out.slice(0, 6);
-}
-var hoursOf = (min) => {
-  const m = num(min);
-  return m > 0 ? m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min` : "";
-};
-var MONTHS = {
-  es: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
-  en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-};
-var dateText = (iso) => {
-  const [y, m, d] = String(iso).split("-").map(Number);
-  return m >= 1 && m <= 12 ? { es: `${d} ${MONTHS.es[m - 1]} ${y}`, en: `${MONTHS.en[m - 1]} ${d}, ${y}` } : { es: iso, en: iso };
-};
-async function loadDetail(args) {
-  const kind = args.k === "movie" ? "movie" : "series";
-  const tmdbId = Number(args.d) || 0;
-  const year = Number(args.y) || 0;
-  let meta = null;
-  if (typeof kino.meta === "function") {
-    if (tmdbId) meta = await kino.meta({ type: kind, ids: { tmdb: tmdbId } }).catch(() => null);
-    if (!meta && kino.meta.byTitle === true && args.t) meta = await kino.meta({ type: kind, title: String(args.t), ...year >= 1870 && year <= 2100 ? { year } : {} }).catch(() => null);
-  }
-  if (!meta) throw Object.assign(new Error("no meta"), { code: "not_found" });
-  const ids = meta.ids || (tmdbId ? { tmdb: tmdbId } : {});
-  const d = {
-    kind,
-    title: String(meta.title || args.t || "").slice(0, 200),
-    overview: String(meta.overview || ""),
-    year: num(meta.year),
-    backdrop: https(meta.backdrop) || https(meta.poster),
-    logo: https(meta.logo),
-    genres: (meta.genres || []).filter((g) => typeof g === "string").slice(0, 4),
-    runtime: num(meta.runtimeMinutes),
-    tagline: String(meta.tagline || ""),
-    certification: String(meta.certification || ""),
-    directors: (meta.directors || []).slice(0, 3),
-    ratings: (meta.ratings || []).slice(0, 3),
-    cast: (meta.cast || []).slice(0, MAX_CAST),
-    ids,
-    episodes: [],
-    similar: []
-  };
-  if (kind === "series") {
-    d.episodes = (Array.isArray(meta.episodes) ? meta.episodes : []).filter((e) => num(e.season) >= 1 && num(e.number) >= 1).slice(0, 600).map((e) => ({ s: num(e.season), n: num(e.number), title: String(e.title || "").slice(0, 120), overview: String(e.overview || "").slice(0, 110), still: https(e.still), air: /^\d{4}-\d{2}-\d{2}/.test(String(e.airDate || "")) ? String(e.airDate).slice(0, 10) : "" }));
-  }
-  if (ids.tmdb && typeof kino.tmdb === "function") {
-    try {
-      const credits = await kino.tmdb(`/${kind === "movie" ? "movie" : "tv"}/${ids.tmdb}/credits`, { language: "es-MX" });
-      const cast = (credits && credits.cast || []).filter((c) => c && c.name).slice(0, MAX_CAST).map((c) => ({ name: String(c.name), character: String(c.character || ""), photo: typeof c.profile_path === "string" && c.profile_path.startsWith("/") ? "https://image.tmdb.org/t/p/w185" + c.profile_path : void 0 }));
-      if (cast.length) d.cast = cast;
-    } catch (_) {
-    }
-    try {
-      d.images = backdropsOf(await kino.tmdb(`/${kind === "movie" ? "movie" : "tv"}/${ids.tmdb}/images`, { include_image_language: "null,es,en" }), d.backdrop);
-    } catch (_) {
-    }
-    try {
-      const data = await kino.tmdb(`/${kind === "movie" ? "movie" : "tv"}/${ids.tmdb}/recommendations`, { language: "es-MX" });
-      d.similar = (data && data.results || []).filter((x) => x && x.id && (x.title || x.name) && x.poster_path).slice(0, 12).map((x) => ({
-        id: (kind === "movie" ? "m-" : "s-") + x.id,
-        ref: (kind === "movie" ? "m:" : "s:") + x.id,
-        kind,
-        title: String(x.title || x.name).slice(0, 200),
-        poster: TMDB_IMG + x.poster_path,
-        ids: { tmdb: x.id }
-      }));
-    } catch (_) {
-    }
-  }
-  return d;
-}
-var heroSkeleton = () => ({ type: "Skeleton", key: "heroSkeleton", shape: "block", height: { compact: 200, expanded: 320 } });
-var railSkeleton = () => ({
-  type: "Column",
-  key: "dskel1",
-  gap: 8,
-  children: [
-    { type: "Skeleton", shape: "line", width: 120 },
-    { type: "Row", gap: 12, children: [1, 2, 3].map((i) => ({ type: "Skeleton", shape: "card", key: `dsk${i}`, flex: 1 })) }
-  ]
-});
-var sectionTitle = (key) => ({ type: "Text", ...twin(key), style: "h4" });
-var episodeGo = (d, r) => ({ go: { title: { ref: r.ref, kind: "series", id: r.id, title: d.title } } });
-function episodeRow(d, r, ep) {
-  const facts = ep.air ? dateText(ep.air) : null;
-  const heading = ep.title ? { text: `${ep.n}. ${ep.title}`, textEn: `${ep.n}. ${ep.title}` } : twin("dEpisodeN", "text", { n: ep.n });
+// src/std/view.js
+var SUPPORT_URL = "https://ko-fi.com/xuperplugins";
+var RESOLVER_REPO = "xuper-plugin/kino-plugin-kino-resolver";
+var POLL_MS = 1500;
+function brand(cfg) {
   return {
     type: "Row",
-    key: `ep-${ep.s}-${ep.n}`,
+    key: "brand",
     gap: 12,
     crossAxisAlignment: "center",
-    onTap: episodeGo(d, r),
-    canRequestFocus: true,
     children: [
-      { type: "Image", key: `epi-${ep.s}-${ep.n}`, width: 120, aspect: "16:9", fit: "cover", radius: "medium", ...ep.still ? { url: ep.still } : {}, fallback: { type: "Skeleton", shape: "block", height: 64 } },
-      { type: "Column", flex: 1, gap: 4, children: [
-        { type: "Text", bold: true, maxLines: 2, ...heading },
-        ...facts ? [{ type: "Text", style: "caption", color: "muted", text: facts.es, textEn: facts.en }] : [],
-        ...ep.overview ? [{ type: "Text", style: "caption", color: "muted", maxLines: 2, ...same(ep.overview) }] : []
-      ] }
+      ...cfg.logo ? [{ type: "Image", key: "logo", url: cfg.logo, aspect: cfg.logoAspect || "1:1", fit: "contain", h: 32, alt: cfg.name, altEn: cfg.nameEn || cfg.name }] : [],
+      { type: "Text", key: "name", style: "h4", text: cfg.name, textEn: cfg.nameEn || cfg.name }
     ]
   };
 }
-function castItem(c) {
-  const name = String(c.name || "").slice(0, 60);
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-  return {
-    type: "Column",
-    key: "cast-" + name.replace(/[^A-Za-z0-9]/g, "").slice(0, 24) + "-" + String(c.character || "").length,
-    width: 96,
-    gap: 4,
-    crossAxisAlignment: "center",
-    canRequestFocus: true,
-    children: [
-      { type: "CircleAvatar", radius: 32, ...https(c.photo) ? { image: https(c.photo) } : {}, text: initials, textEn: initials },
-      { type: "Text", ...same(name), style: "caption", maxLines: 2 },
-      ...c.character ? [{ type: "Text", ...same(String(c.character).slice(0, 40)), style: "caption", color: "muted", maxLines: 1 }] : []
-    ]
-  };
+var tabBar = (tabs, active) => ({
+  type: "TabBar",
+  key: "tabs",
+  divider: false,
+  value: active,
+  onChanged: "tab",
+  tabs: tabs.map((t2) => ({ value: t2.id, label: t2.label, labelEn: t2.labelEn || t2.label }))
+});
+var iconButton = (key, icon, word, onPressed) => ({ type: "IconButton", key, icon, ...twin(word, "labelText"), ...twin(word, "tooltip"), onPressed });
+var searchOpenOps = (tabsInBar) => [
+  { hide: "brand" },
+  { hide: "searchButton" },
+  { hide: "settingsButton" },
+  ...tabsInBar ? [{ hide: "tabs" }] : [],
+  { show: "closeSearch" },
+  { show: "q" },
+  { focus: "q" }
+];
+var searchClosedOps = (tabsInBar) => [
+  { hide: "closeSearch" },
+  { hide: "q" },
+  { clear: "q" },
+  { show: "brand" },
+  { show: "searchButton" },
+  { show: "settingsButton" },
+  ...tabsInBar ? [{ show: "tabs" }] : []
+];
+function supportNode(device) {
+  if (device === "tv") return { type: "QrImage", key: "donate", value: SUPPORT_URL, size: "large", ...twin("supportTv", "labelText") };
+  return { type: "ElevatedButton", key: "donate", icon: "heart", ...twin("support", "labelText"), onPressed: { go: { url: { href: SUPPORT_URL } } } };
 }
-function detailView({ r, entry, season, logo: logo2, back }) {
-  const d = entry && entry.d;
-  const appBar = { type: "AppBar", mergeWithKinoBar: true, dense: true, divider: false, leading: back, title: logo2 };
-  const body = [];
-  let hero2 = null;
-  if (!entry) {
-    hero2 = heroSkeleton();
-    body.push(railSkeleton());
-  } else if (!d) {
-    body.push({ type: "MaterialBanner", key: "detailFailed", role: "error", ...twin("brFailed"), action: { ...twin("brRetry", "label"), onTap: "dretry" } });
-    body.push({ type: "ElevatedButton", key: "dkino", icon: "play", ...twin("dSeeInKino", "labelText"), onPressed: { go: { title: { ref: r.ref, kind: r.kind, id: r.id, title: r.title } } } });
-  } else {
-    const series = d.kind === "series";
-    const seasons = [...new Set(d.episodes.map((e) => e.s))].sort((a, b) => a - b);
-    const shown = seasons.includes(season) ? season : seasons[0];
-    const toKino = { go: { title: { ref: r.ref, kind: d.kind, id: r.id, title: r.title || d.title } } };
-    const buttons = series ? [{ type: "ElevatedButton", key: "dplay", ...twin("dSeriesGo", "labelText"), icon: "play", autofocus: true, onPressed: toKino }] : [
-      { type: "ElevatedButton", key: "dplay", ...twin("brWatch", "labelText"), icon: "play", autofocus: true, onPressed: { go: { play: { ref: r.ref, kind: "movie", id: r.id, title: d.title } } } },
-      { type: "TextButton", key: "dmore", ...twin("dMore", "labelText"), onPressed: toKino }
-    ];
-    const lead = d.tagline || (d.overview.length <= LEAD_MAX ? d.overview : d.overview.slice(0, LEAD_MAX - 1).trimEnd() + "\u2026");
-    const images = (d.images && d.images.length ? d.images : [d.backdrop || ""]).slice(0, 6);
-    const slide = (image, i) => ({
-      type: "heroCard",
-      key: i ? "dhero-" + i : "dhero",
-      h: { compact: 240, expanded: 320 },
-      title: d.title,
-      titleEn: d.title,
-      ...lead ? same(lead) : {},
-      ...image ? { image } : {},
-      ...d.logo ? { logo: d.logo } : {},
-      buttons: i ? buttons.map((b) => ({ ...b, key: b.key + "-" + i, autofocus: false })) : buttons
-    });
-    hero2 = images.length > 1 ? { type: "PageView", key: "hero" + images.length, autoPlayMs: 6e3, children: images.map(slide) } : slide(images[0], 0);
-    const rating = d.ratings.find((x) => x.source === "imdb") || d.ratings.find((x) => x.source === "tmdb");
-    const facts = [];
-    if (rating) facts.push("\u2605 " + rating.value);
-    if (d.year) facts.push(String(d.year));
-    if (d.certification) facts.push(d.certification);
-    if (d.runtime) facts.push(hoursOf(d.runtime));
-    const es = facts.concat(series && seasons.length ? [both("dSeasonsN", { n: seasons.length }).es] : []);
-    const en = facts.concat(series && seasons.length ? [both("dSeasonsN", { n: seasons.length }).en] : []);
-    if (es.length) body.push({ type: "Text", key: "dfacts", style: "h4", text: es.join("  \xB7  "), textEn: en.join("  \xB7  ") });
-    if (d.genres.length) body.push({ type: "Row", key: "dgenres", gap: 8, children: d.genres.map((g, i) => ({ type: "Badge", key: "dg-" + i, ...same(g) })) });
-    if (d.overview) body.push({ type: "Text", key: "dsynopsis", canRequestFocus: true, ...same(d.overview) });
-    if (d.directors.length) body.push({ type: "Text", ...twin(series ? "dCreators" : "dDirector", "text", { v: d.directors.join(", ") }), color: "muted" });
-    if (d.cast.length) {
-      body.push(sectionTitle("dCast"));
-      body.push({ type: "SingleChildScrollView", key: "dcast", direction: "horizontal", children: [{ type: "Row", gap: 12, children: d.cast.map(castItem) }] });
-    }
-    if (series && seasons.length) {
-      body.push(seasons.length > 1 ? { type: "DropdownButton", key: "dseason", value: String(shown), onChanged: "season", options: seasons.map((s) => {
-        const w = both("dSeasonN", { n: s });
-        return { value: String(s), label: w.es, labelEn: w.en };
-      }) } : sectionTitle("dEpisodes"));
-      for (const ep of d.episodes.filter((e) => e.s === shown).slice(0, MAX_EPISODES)) body.push(episodeRow(d, r, ep));
-    }
-    if (d.similar.length) {
-      body.push(sectionTitle("dSimilar"));
-      body.push(cardRow(d.similar, "dsimilar", "small"));
-    }
-  }
-  return {
-    type: "Scaffold",
-    appBar,
-    body: { type: "SingleChildScrollView", key: "detail-page", children: [...hero2 ? [hero2] : [], { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] },
-    ...!entry ? { every: { ms: 1e3, event: "dtick" } } : {}
-  };
-}
-
-// src/browse/view.js
-var TAB_KEYS = { inicio: "tabHome", peliculas: "tabMovies", series: "tabSeries" };
-var POLL_MS = 1500;
-var twin2 = (key, field = "text", vars) => {
-  const w = both(key, vars);
-  return { [field]: w.es, [field + "En"]: w.en };
-};
-var logo = () => ({ type: "Text", key: "logo", text: "Embed69", textEn: "Embed69", style: "h4" });
-var tabBar = (active) => ({ type: "TabBar", key: "tabs", divider: false, value: active, onChanged: "tab", tabs: TAB_IDS.map((id) => ({ value: id, ...twin2(TAB_KEYS[id], "label") })) });
-var railSkeleton2 = (n) => ({
+var bar = ({ leading, title, actions = [] }) => ({ type: "AppBar", mergeWithKinoBar: true, dense: true, divider: false, leading, title, actions });
+var railSkeleton = (n) => ({
   type: "Column",
   key: "skel" + n,
   gap: 8,
@@ -798,7 +302,8 @@ var railSkeleton2 = (n) => ({
     { type: "Row", gap: 12, sizes: ["medium", "expanded"], children: [1, 2, 3, 4, 5, 6].map((i) => ({ type: "Skeleton", shape: "card", key: `sk${n}w${i}`, flex: 1 })) }
   ]
 });
-var heroSkeleton2 = () => ({ type: "Skeleton", key: "heroSkeleton", shape: "block", height: { compact: 200, expanded: 320 } });
+var heroSkeleton = () => ({ type: "Skeleton", key: "heroSkeleton", shape: "block", height: { compact: 200, expanded: 320 } });
+var titleOf = (s) => ({ ref: s.ref, kind: s.kind, id: s.id, title: s.title });
 var slideNode = (s) => ({
   type: "heroCard",
   key: "slide-" + s.id,
@@ -808,19 +313,8 @@ var slideNode = (s) => ({
   text: s.text,
   image: s.image,
   buttons: [
-    {
-      type: "ElevatedButton",
-      key: "watch-" + s.id,
-      ...twin2("brWatch", "labelText"),
-      icon: "play",
-      onPressed: { go: { play: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } }
-    },
-    {
-      type: "TextButton",
-      key: "info-" + s.id,
-      ...twin2("brInfo", "labelText"),
-      onPressed: { go: { title: { ref: s.ref, kind: s.kind, id: s.id, title: s.title } } }
-    }
+    { type: "ElevatedButton", key: "watch-" + s.id, ...twin("watch", "labelText"), icon: "play", onPressed: { go: { play: titleOf(s) } } },
+    { type: "TextButton", key: "info-" + s.id, ...twin("info", "labelText"), onPressed: { go: { title: titleOf(s) } } }
   ]
 });
 var hero = (slides) => slides.length === 1 ? slideNode(slides[0]) : {
@@ -829,95 +323,96 @@ var hero = (slides) => slides.length === 1 ? slideNode(slides[0]) : {
   autoPlayMs: 6e3,
   children: slides.map(slideNode)
 };
-var rail = (r, key, titleOverride) => ({
-  type: "Column",
+var rail = (r, key, words) => ({
+  type: "titleRail",
   key,
-  gap: 8,
-  children: [
-    { type: "Row", key: key + "-h", crossAxisAlignment: "center", children: [
-      { type: "Text", style: "h4", flex: 1, text: titleOverride ? titleOverride.title : r.title, textEn: titleOverride ? titleOverride.titleEn : r.title },
-      ...r.ref ? [{ type: "TextButton", key: key + "-more", ...twin2("brMore", "labelText"), onPressed: { go: { browse: { ref: r.ref, title: r.title } } } }] : []
-    ] },
-    cardRow(r.items, key, "medium")
-  ]
+  ...words || { title: r.title, titleEn: r.titleEn || r.title },
+  ...r.ref ? { ref: r.ref } : {},
+  items: r.items
 });
-function browseView({ tab, data, recent, pending, failed, searching = false, device = "phone" }) {
+function browseView(cfg, { tab, data, recent, pending, failed, device = "phone" }) {
   const tv = device === "tv";
-  const gear = { type: "IconButton", key: "settingsButton", icon: "settings", ...twin2("brSettings", "labelText"), ...twin2("brSettings", "tooltip"), onPressed: { event: "go", arg: "settings" } };
-  const active = TAB_IDS.includes(tab) ? tab : TAB_IDS[0];
+  const tabs = cfg.tabs;
+  const active = tabs.some((t2) => t2.id === tab) ? tab : tabs[0].id;
+  const withTabs = tabs.length > 1;
   const body = [];
   if (data) {
     if (data.slides.length > 0) body.push(hero(data.slides));
-    if (recent.length > 0) body.push(rail({ items: recent }, "recent", twin2("brRecent", "title")));
+    if (recent.length > 0) body.push(rail({ items: recent }, "recent", twin("recent", "title")));
     for (const r of data.rails) body.push(rail(r, "rail-" + String(r.id).replace(/[^A-Za-z0-9_-]/g, "_")));
-    if (data.rails.length === 0) body.push({ type: "Text", ...twin2("brEmpty", "text"), color: "muted" });
+    if (data.rails.length === 0) body.push({ type: "Text", key: "empty", ...twin("empty"), color: "muted" });
   } else if (failed) {
-    body.push({
-      type: "MaterialBanner",
-      key: "loadFailed",
-      role: "error",
-      ...twin2("brFailed"),
-      action: { ...twin2("brRetry", "label"), onTap: "retry" }
-    });
+    body.push({ type: "MaterialBanner", key: "loadFailed", role: "error", ...twin("failed"), action: { ...twin("retry", "label"), onTap: "retry" } });
   } else {
-    body.push(heroSkeleton2(), railSkeleton2(1), railSkeleton2(2), railSkeleton2(3));
+    body.push(heroSkeleton(), railSkeleton(1), railSkeleton(2), railSkeleton(3));
   }
   const isBanner = (n) => !!n && (n.type === "heroCard" || n.key === "heroSkeleton" || n.type === "PageView" && String(n.key).startsWith("hero"));
   const banner = body.length > 0 && isBanner(body[0]) ? body.shift() : null;
-  const appBar = searching ? {
-    type: "AppBar",
-    mergeWithKinoBar: true,
-    dense: true,
-    divider: false,
-    leading: { type: "IconButton", key: "searchBack", icon: "arrow_back", ...twin2("brBack", "labelText"), ...twin2("brBack", "tooltip"), onPressed: "closeSearch" },
-    title: { type: "TextField", key: "q", kind: "search", autofocus: true, ...twin2("brSearchHint", "hintText"), maxLength: 100, onSubmitted: "search", trailingIcon: "search", ...twin2("brSearch", "trailingLabel"), onTrailingTap: "search" }
-  } : {
-    type: "AppBar",
-    mergeWithKinoBar: true,
-    dense: true,
-    divider: false,
-    leading: { type: "IconButton", key: "close", icon: "close", ...twin2("brClose", "labelText"), ...twin2("brClose", "tooltip"), onPressed: { go: { close: true } } },
-    // The search button sits in the bar next to the gear (not a floating button), on a phone as on a TV.
-    actions: [{ type: "IconButton", key: "searchButton", icon: "search", ...twin2("brSearch", "labelText"), ...twin2("brSearch", "tooltip"), onPressed: "openSearch" }, gear],
-    // On a TV the tabs sit in the bar beside the logo (one row, one D-pad strip); elsewhere they are pinned under it.
-    title: tv ? { type: "Row", key: "titleRow", gap: 24, crossAxisAlignment: "center", children: [logo(), tabBar(active)] } : logo()
-  };
+  const tabsInBar = tv && withTabs;
+  const appBar = bar({
+    leading: iconButton("close", "close", "close", { go: { close: true } }),
+    title: { type: "Row", key: "titleRow", gap: tabsInBar ? 24 : 8, crossAxisAlignment: "center", children: [
+      { ...iconButton("closeSearch", "arrow_back", "back", { ui: searchClosedOps(tabsInBar) }), hidden: true },
+      brand(cfg),
+      ...tabsInBar ? [tabBar(tabs, active)] : [],
+      {
+        type: "TextField",
+        key: "q",
+        hidden: true,
+        flex: 1,
+        kind: "search",
+        maxLength: 200,
+        ...twin("searchHint", "hintText", { name: [cfg.name, cfg.nameEn || cfg.name] }),
+        onSubmitted: "search",
+        trailingIcon: "search",
+        ...twin("search", "trailingLabel"),
+        onTrailingTap: "search"
+      }
+    ] },
+    actions: [
+      iconButton("searchButton", "search", "search", { ui: searchOpenOps(tabsInBar) }),
+      iconButton("settingsButton", "settings", "settings", "openSettings")
+    ]
+  });
   return {
     type: "Scaffold",
     appBar,
-    // The tabs stay pinned under the bar; only the rows scroll.
     body: { type: "Column", key: "page", children: [
-      // The tabs line up with the bar's buttons and the cards below (a wide window and the TV pad their content by 24).
-      ...tv ? [] : [{ type: "Column", key: "tabsRow", padding: { compact: 0, expanded: 24 }, children: [tabBar(active)] }],
+      ...withTabs && !tv ? [{ type: "Column", key: "tabsRow", padding: { compact: 0, expanded: 24 }, children: [tabBar(tabs, active)] }] : [],
       { type: "SingleChildScrollView", key: "browse-" + active, flex: 1, children: [...banner ? [banner] : [], { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] }
     ] },
     ...pending ? { every: { ms: POLL_MS, event: "tick" } } : {}
   };
 }
-function settingsView() {
+function settingsView(cfg, device = "phone") {
   return {
     type: "Scaffold",
-    appBar: {
-      type: "AppBar",
-      mergeWithKinoBar: true,
-      dense: true,
-      divider: false,
-      leading: { type: "IconButton", key: "back", icon: "arrow_back", ...twin2("brBack", "labelText"), ...twin2("brBack", "tooltip"), onPressed: "back" },
-      title: logo()
-    },
-    body: { type: "SingleChildScrollView", key: "settings-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: [{ type: "settings", key: "form" }] }] }
+    appBar: bar({ leading: iconButton("back", "arrow_back", "back", "back"), title: brand(cfg) }),
+    body: { type: "SingleChildScrollView", key: "settings-page", children: [{ type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: [
+      ...cfg.hasSettings ? [{ type: "settings", key: "form" }, { type: "Divider", key: "supportDivider" }] : [],
+      supportNode(device)
+    ] }] }
   };
 }
-function detailPage({ r, entry, season }) {
-  const back = { type: "IconButton", key: "back", icon: "arrow_back", ...twin2("brBack", "labelText"), ...twin2("brBack", "tooltip"), onPressed: "back" };
-  return detailView({ r, entry, season, logo: logo(), back });
+function gateView(cfg, device = "phone") {
+  const name = [cfg.name, cfg.nameEn || cfg.name];
+  return {
+    type: "Scaffold",
+    appBar: bar({ leading: iconButton("close", "close", "close", { go: { close: true } }), title: brand(cfg) }),
+    body: { type: "Column", key: "gate", mainAxisAlignment: "center", crossAxisAlignment: "center", padding: 24, gap: 16, children: [
+      { type: "Text", key: "gateTitle", style: "h3", ...twin("gateTitle") },
+      { type: "Text", key: "gateText", style: "p", ...twin("gateText", "text", { name }) },
+      { type: "ElevatedButton", key: "installResolver", ...twin("gateInstall", "labelText"), onPressed: { go: { installPlugin: { repo: RESOLVER_REPO } } } },
+      supportNode(device)
+    ] }
+  };
 }
 
-// src/browse/metaCache.js
+// src/std/metaCache.js
 var KEY = "meta1";
 var MAX = 120;
 var CALL_MS = 8e3;
-var HTTPS3 = /^https:\/\//;
+var HTTPS2 = /^https:\/\//;
 function makeMetaCache({ kino: kino2, clock = { now: () => Date.now() } }) {
   const usable = () => {
     try {
@@ -948,7 +443,7 @@ function makeMetaCache({ kino: kino2, clock = { now: () => Date.now() } }) {
   function known(id) {
     const e = read()[id];
     if (!e) return {};
-    return { ...e.t > 0 ? { tmdb: e.t } : {}, ...e.l && HTTPS3.test(e.l) ? { logo: e.l } : {} };
+    return { ...e.t > 0 ? { tmdb: e.t } : {}, ...e.l && HTTPS2.test(e.l) ? { logo: e.l } : {} };
   }
   function dress(cards) {
     return cards.map((c) => {
@@ -956,7 +451,7 @@ function makeMetaCache({ kino: kino2, clock = { now: () => Date.now() } }) {
       return k.tmdb && !(c.ids && c.ids.tmdb) ? { ...c, ids: { ...c.ids || {}, tmdb: k.tmdb } } : c;
     });
   }
-  async function fill(cards, budgetMs) {
+  async function fill2(cards, budgetMs) {
     if (!usable()) return 0;
     const b = read();
     const end = clock.now() + budgetMs;
@@ -977,18 +472,22 @@ function makeMetaCache({ kino: kino2, clock = { now: () => Date.now() } }) {
     if (asked > 0) write();
     return asked;
   }
-  return { known, dress, fill, usable };
+  return { known, dress, fill: fill2, usable };
 }
 
-// src/browse/index.js
+// src/std/index.js
 var TAB_KEY = "browseTab";
 var SNAP_PREFIX = "browse1:";
 var SNAP_TTL_MS = 7 * 24 * 3600 * 1e3;
-var HOME_KEY = "home1";
 var SNAP_MAX = 20 * 1024;
 var RECENT_KEY = "recent1";
 var RECENT_MAX = 12;
-function makeBrowse({ kino: kino2, loadTab }) {
+var Q_MAX = 200;
+var META_TICK_MS = 3e3;
+var DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
+function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null }) {
+  const cfg = { name, nameEn, logo, logoAspect, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
+  const TAB_IDS = cfg.tabs.map((t2) => t2.id);
   const meta = makeMetaCache({ kino: kino2 });
   const enrich = (data) => data ? {
     slides: data.slides.map((s) => {
@@ -1000,7 +499,7 @@ function makeBrowse({ kino: kino2, loadTab }) {
   const memo = /* @__PURE__ */ new Map();
   const log = (...a) => {
     try {
-      kino2.log("[latino]", ...a);
+      kino2.log("[std]", ...a);
     } catch (_) {
     }
   };
@@ -1036,19 +535,18 @@ function makeBrowse({ kino: kino2, loadTab }) {
     }
   }
   function homeSeed(tab) {
-    if (tab !== "inicio") return null;
+    if (!homeKey || tab !== TAB_IDS[0]) return null;
     try {
-      const o = JSON.parse(get(HOME_KEY) || "null");
+      const o = JSON.parse(get(homeKey) || "null");
       return o && Array.isArray(o.rows) && o.rows.length ? tabOf({ rows: o.rows }) : null;
     } catch (_) {
       return null;
     }
   }
   const stored = () => {
-    const t3 = get(TAB_KEY);
-    return TAB_IDS.includes(t3) ? t3 : null;
+    const t2 = get(TAB_KEY);
+    return TAB_IDS.includes(t2) ? t2 : null;
   };
-  const remember = (tab) => set(TAB_KEY, tab);
   function dataOf(tab) {
     if (memo.has(tab)) return memo.get(tab).data;
     const snap = readSnap(tab) || homeSeed(tab);
@@ -1076,34 +574,27 @@ function makeBrowse({ kino: kino2, loadTab }) {
     } catch (_) {
     }
   }
-  const details = /* @__PURE__ */ new Map();
-  const paramsOf = (route) => route && route.params && typeof route.params === "object" ? route.params : {};
   const tabFromArgs = (route) => {
     const a = route && route.args && typeof route.args === "object" ? route.args : {};
     return TAB_IDS.includes(a.tab) ? a.tab : null;
   };
-  function needed(tab, device) {
-    const order = [tab, ...TAB_IDS.filter((t3) => t3 !== tab)];
-    return order.filter((t3, i) => (i === 0 || device !== "tv") && !(memo.get(t3) && memo.get(t3).whole));
+  function needed(tab) {
+    return memo.get(tab) && memo.get(tab).whole ? [] : [tab];
   }
-  function view(ctx) {
-    const st = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-    if (ctx.route && ctx.route.name === "settings") return settingsView();
-    if (ctx.route && ctx.route.name === "detail") {
-      const p = paramsOf(ctx.route);
-      if (typeof p.open === "string" && typeof p.i === "string") {
-        return detailPage({ r: { ref: p.open, id: p.i, kind: p.k === "movie" ? "movie" : "series", title: typeof p.t === "string" ? p.t : "" }, entry: details.get(p.open) || null, season: Number(st.season) || 0 });
-      }
-    }
-    const tab = TAB_IDS.includes(st.tab) ? st.tab : tabFromArgs(ctx.route) ?? stored() ?? TAB_IDS[0];
+  function screen2(ctx) {
+    const c = ctx || {};
+    const device = c.device || "phone";
+    if (needsResolver && !(c.installed && c.installed[RESOLVER_REPO])) return gateView(cfg, device);
+    if (c.route && c.route.name === "settings") return settingsView(cfg, device);
+    const st = c.state && typeof c.state === "object" ? c.state : {};
+    const tab = TAB_IDS.includes(st.tab) ? st.tab : tabFromArgs(c.route) ?? stored() ?? TAB_IDS[0];
     const data = enrich(dataOf(tab));
-    const loaded = TAB_IDS.map((t3) => memo.get(t3)).filter(Boolean).map((m) => m.data);
+    const loaded = TAB_IDS.map((t2) => memo.get(t2)).filter(Boolean).map((m) => m.data);
     const pending = Array.isArray(st.pending) && st.pending.length > 0;
-    return browseView({ tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), searching: !!st.searching, device: ctx.device });
+    return browseView(cfg, { tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), device });
   }
   async function load(tab) {
-    const page = await loadTab(tab);
-    const data = tabOf(page);
+    const data = tabOf(await loadTab(tab));
     if (data) {
       memo.set(tab, { data, whole: true });
       writeSnap(tab, data);
@@ -1113,53 +604,22 @@ function makeBrowse({ kino: kino2, loadTab }) {
   const events = {
     open({ route, state, device }) {
       const tab = tabFromArgs(route) ?? (TAB_IDS.includes(state.tab) ? state.tab : stored() ?? TAB_IDS[0]);
-      for (const t3 of TAB_IDS) dataOf(t3);
-      const out = { state: { tab, pending: needed(tab, device), failed: null } };
-      const a = route && route.args && typeof route.args === "object" ? route.args : {};
-      if (typeof a.open === "string" && typeof a.i === "string" && (a.k === "movie" || a.k === "series")) {
-        out.route = { push: "detail", params: { open: a.open, i: a.i, t: typeof a.t === "string" ? a.t.slice(0, 100) : "", k: a.k, d: Number(a.d) || 0, y: Number(a.y) || 0 } };
-        out.state.season = null;
-      }
-      return out;
-    },
-    // A card of the list was tapped: its page goes over the list.
-    openTitle({ arg }) {
-      const route = pushOf(arg);
-      return route ? { route, state: { season: null } } : null;
-    },
-    // The page's timer: loads the title once, then no timer.
-    async dtick({ route }) {
-      const p = paramsOf(route);
-      if (typeof p.open !== "string" || details.has(p.open)) return { state: { dv: Date.now() } };
-      try {
-        details.set(p.open, { d: await loadDetail({ t: p.t, k: p.k, d: p.d, y: p.y }) });
-      } catch (e) {
-        log("browse detail", e && e.code || "error");
-        details.set(p.open, { d: null });
-      }
-      return { state: { dv: Date.now() } };
-    },
-    dretry({ route }) {
-      details.delete(paramsOf(route).open);
-      return { state: { dv: Date.now() } };
-    },
-    season({ value, arg }) {
-      const n = parseInt(value != null ? value : arg, 10);
-      return n > 0 ? { state: { season: n } } : null;
+      for (const t2 of TAB_IDS) dataOf(t2);
+      return { state: { tab, pending: needed(tab), failed: null } };
     },
     tab({ value, arg, state }) {
       const tab = TAB_IDS.includes(value) ? value : TAB_IDS.includes(arg) ? arg : null;
       if (!tab) return null;
-      remember(tab);
+      set(TAB_KEY, tab);
       dataOf(tab);
       const failed = { ...state.failed || {} };
       delete failed[tab];
-      const pending = [tab, ...Array.isArray(state.pending) ? state.pending.filter((t3) => t3 !== tab) : []];
+      const pending = [tab, ...Array.isArray(state.pending) ? state.pending.filter((t2) => t2 !== tab) : []];
       return { state: { tab, pending: memo.get(tab) && memo.get(tab).whole ? pending.slice(1) : pending, failed } };
     },
-    retry({ state, device }) {
+    retry({ state }) {
       const tab = TAB_IDS.includes(state.tab) ? state.tab : TAB_IDS[0];
-      return { state: { failed: null, pending: [tab, ...needed(tab, device).filter((t3) => t3 !== tab)] } };
+      return { state: { failed: null, pending: [tab] } };
     },
     async tick({ state }) {
       const pending = Array.isArray(state.pending) ? state.pending : [];
@@ -1168,7 +628,7 @@ function makeBrowse({ kino: kino2, loadTab }) {
       const failed = { ...state.failed || {} };
       if (next.startsWith("meta:")) {
         const m = memo.get(next.slice(5));
-        if (m) await meta.fill([...m.data.slides.map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...m.data.rails.flatMap((r) => r.items.slice(0, 6).map((c) => ({ id: c.id, title: c.title, kind: c.kind })))], 12e3);
+        if (m) await meta.fill([...m.data.slides.map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...m.data.rails.flatMap((r) => r.items.slice(0, 6).map((x) => ({ id: x.id, title: x.title, kind: x.kind })))], META_TICK_MS);
         return { state: { pending: rest } };
       }
       try {
@@ -1177,46 +637,45 @@ function makeBrowse({ kino: kino2, loadTab }) {
         else delete failed[next];
         if (ok && meta.usable()) rest.unshift("meta:" + next);
       } catch (e) {
-        log("browse tab", e && e.code || "error");
+        log("tab", e && e.code || "error");
         failed[next] = true;
       }
       return { state: { pending: rest, failed } };
     },
-    // The search button in the bar opens the box; its words go to Kino's own search of this plugin (plugin.search, filtered to what
-    // embed69 actually has), and the back button closes the box without leaving the screen.
-    openSearch() {
-      return { state: { searching: true } };
+    // The words go to Kino's own search, with this plugin as the source; the bar is put back as it was, locally.
+    search({ value, state, device }) {
+      const typed = value && typeof value === "object" ? value.q : value;
+      const raw = typed != null && String(typed).trim() !== "" ? typed : state.inputs && state.inputs.q;
+      const q = String(raw == null ? "" : raw).trim().slice(0, Q_MAX);
+      return q ? { go: { search: { q } }, ui: searchClosedOps(device === "tv" && TAB_IDS.length > 1) } : null;
     },
-    closeSearch() {
-      return { state: { searching: false } };
-    },
-    search({ value, state }) {
-      const typed = value && typeof value === "object" && typeof value.q === "string" ? value.q : typeof value === "string" ? value : state.inputs && state.inputs.q;
-      const q = String(typed == null ? "" : typed).trim().slice(0, 100);
-      return q ? { go: { search: { q } }, state: { searching: false } } : { state: { searching: false } };
-    },
-    // The gear: the plugin's settings are a page of their own, one Back away.
-    go({ arg }) {
-      return arg === "settings" ? { route: { push: "settings" }, state: { fromBrowse: true } } : null;
+    openSettings() {
+      return { route: { push: "settings" }, state: { fromBrowse: true } };
     },
     back({ state, route }) {
       if (route && route.name === "settings" && !state.fromBrowse) return { close: true };
-      return { route: { pop: true } };
+      return { route: { pop: true }, state: { fromBrowse: false } };
     }
   };
-  async function event(ev) {
-    const handler = Object.hasOwn(events, ev.name) ? events[ev.name] : null;
-    return handler ? await handler({ ...ev, state: ev.state || {} }) ?? null : null;
+  async function screenEvent2(ev) {
+    const e = ev || {};
+    const name2 = e.name != null ? e.name : e.event;
+    const handler = typeof name2 === "string" && Object.hasOwn(events, name2) ? events[name2] : null;
+    return handler ? await handler({ ...e, state: e.state || {} }) ?? null : null;
   }
-  return { view, event, notePlayed };
+  return { screen: screen2, screenEvent: screenEvent2, notePlayed };
 }
+
+// src/logo.js
+var LOGO = "data:image/png;base64,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";
+var LOGO_ASPECT = "1:1";
 
 // src/plugin.js
 var tmdb = (path, params = {}) => kino.tmdb(path, { language: String(kino.lang || "").toLowerCase().startsWith("en") ? "en-US" : "es-MX", ...params });
 globalThis.__kinoDropPendingFetches = true;
 if (typeof kino.meta !== "function") throw kino.error("unavailable", "kino.meta not available");
 if (typeof kino.tmdb !== "function") throw kino.error("unavailable", "kino.tmdb not available");
-var TMDB_IMG2 = "https://image.tmdb.org/t/p/";
+var TMDB_IMG = "https://image.tmdb.org/t/p/";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var RESOLVE_MS = 4e4;
 var MAX_COPIES = 8;
@@ -1277,7 +736,7 @@ var STRINGS = {
     needResolver: "To play, open Embed69 from the menu and install the playback engine it asks for."
   }
 };
-function t2(key) {
+function t(key) {
   const lang = String(kino.lang || "es").startsWith("en") ? "en" : "es";
   return (STRINGS[lang] || STRINGS.es)[key] || key;
 }
@@ -1319,8 +778,8 @@ function itemFromTmdb(raw, kind) {
     title: String(raw.title || raw.name || ""),
     kind: isMovie ? "movie" : "series",
     year: (raw.release_date || raw.first_air_date || "").slice(0, 4) || void 0,
-    poster: raw.poster_path ? TMDB_IMG2 + "w500" + raw.poster_path : void 0,
-    backdrop: raw.backdrop_path ? TMDB_IMG2 + "w1280" + raw.backdrop_path : void 0,
+    poster: raw.poster_path ? TMDB_IMG + "w500" + raw.poster_path : void 0,
+    backdrop: raw.backdrop_path ? TMDB_IMG + "w1280" + raw.backdrop_path : void 0,
     overview: raw.overview || void 0,
     rating: raw.vote_average > 0 ? Math.round(raw.vote_average * 10) / 10 : void 0,
     ids: { tmdb: tmdbId },
@@ -1358,7 +817,7 @@ var DISCOVER = { sort_by: "popularity.desc", "vote_count.gte": 200 };
 async function homeRow(row) {
   const res = await tmdb(row.path, { ...row.path.startsWith("/discover") ? DISCOVER : {}, ...row.params || {} });
   const items = (res?.results || []).filter((r) => r.poster_path).slice(0, 20).map((r) => itemFromTmdb(r, row.kind));
-  return items.length ? { id: row.id, title: t2(row.title), genre: row.genre, ref: row.ref, items } : null;
+  return items.length ? { id: row.id, title: t(row.title), genre: row.genre, ref: row.ref, items } : null;
 }
 var HOME_BUDGET_MS = 14e3;
 var TAB_ROWS = {
@@ -1380,7 +839,7 @@ async function rowsWithin(defs) {
   const end = Date.now() + HOME_BUDGET_MS;
   while (!done && Date.now() < end) await Promise.race([all, kino.sleep(Math.min(250, Math.max(1, end - Date.now())))]);
   const rows = out.filter(Boolean);
-  if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t2("unavailable") });
+  if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t("unavailable") });
   return rows;
 }
 var SEARCH_CHECK_CAP = 18;
@@ -1460,9 +919,9 @@ async function categories() {
 async function episodes(ref) {
   const tmdbId = ref.startsWith("s:") ? ref.slice(2) : ref;
   const meta = await kino.meta({ type: "series", ids: { tmdb: Number(tmdbId) } });
-  if (!meta) throw kino.error("not_found", "series not found: tmdb " + tmdbId, { userMessage: t2("noMeta") });
+  if (!meta) throw kino.error("not_found", "series not found: tmdb " + tmdbId, { userMessage: t("noMeta") });
   const imdbId = meta.ids?.imdb;
-  if (!imdbId) throw kino.error("not_found", "no IMDB id for series tmdb:" + tmdbId, { userMessage: t2("noMeta") });
+  if (!imdbId) throw kino.error("not_found", "no IMDB id for series tmdb:" + tmdbId, { userMessage: t("noMeta") });
   kino.storage.set("imdb:series:" + tmdbId, imdbId, { ttlMs: 30 * DAY_MS });
   return {
     series: {
@@ -1537,7 +996,7 @@ function ordered(copies) {
   const rank = (c) => Math.max(0, langs.indexOf(c.lang)) * 100 + (1 - scoreOf(c.server, stats)) * 20 + order(c.server);
   return [...copies].sort((a, b) => rank(a) - rank(b));
 }
-var labelOf = (c) => `${t2(c.lang)} \xB7 ${SERVER_LABEL[c.server] || c.server}`;
+var labelOf = (c) => `${t(c.lang)} \xB7 ${SERVER_LABEL[c.server] || c.server}`;
 function copyRef(title, c) {
   return title.kind === "tv" ? `cp:ep:${title.imdbId}:${title.season}:${title.episode}:${c.lang}:${c.server}` : `cp:movie:${title.imdbId}:${c.lang}:${c.server}`;
 }
@@ -1582,7 +1041,7 @@ async function open(c, req, budget) {
     return null;
   }
 }
-async function titleOf(ref) {
+async function titleOf2(ref) {
   if (ref.startsWith("ep:")) {
     const [, imdbId, season, episode] = ref.split(":");
     return { kind: "tv", imdbId, season: Number(season), episode: Number(episode) };
@@ -1590,13 +1049,11 @@ async function titleOf(ref) {
   if (ref.startsWith("m:")) {
     const tmdbId = ref.slice(2);
     const imdbId = await imdbFor(tmdbId, "movie");
-    if (!imdbId) throw kino.error("not_found", "no IMDB id for movie tmdb:" + tmdbId, { userMessage: t2("noMeta") });
+    if (!imdbId) throw kino.error("not_found", "no IMDB id for movie tmdb:" + tmdbId, { userMessage: t("noMeta") });
     return { kind: "movie", imdbId };
   }
   throw kino.error("not_found", "unknown ref: " + ref.slice(0, 40));
 }
-var RESOLVER_REPO = "xuper-plugin/kino-plugin-kino-resolver";
-var SUPPORT_URL = "https://ko-fi.com/xuperplugins";
 async function resolverInstalled() {
   try {
     await kino.plugins.call("resolver", "normalizeHost", { url: "https://probe.invalid/" });
@@ -1605,42 +1062,31 @@ async function resolverInstalled() {
     return (e && e.code) !== "provider_missing";
   }
 }
-function supportNode(device) {
-  if (device === "tv") return { type: "QrImage", value: SUPPORT_URL, size: "large", labelText: "Si te gusta mi trabajo, escan\xE9alo y ap\xF3yame", labelTextEn: "If you like my work, scan it and support me" };
-  return { type: "ElevatedButton", key: "donate", icon: "heart", labelText: "Si te gusta mi trabajo, ap\xF3yame", labelTextEn: "If you like my work, support me", onPressed: { go: { url: { href: SUPPORT_URL } } } };
-}
-function installGateView(device) {
-  return {
-    type: "Scaffold",
-    key: "embed69-install",
-    body: { type: "SingleChildScrollView", key: "installScroll", children: [
-      { type: "Column", padding: 24, gap: 16, crossAxisAlignment: "stretch", children: [
-        { type: "Text", text: "Necesitas el motor de reproducci\xF3n", textEn: "You need the playback engine", style: "h3" },
-        { type: "Text", color: "secondary", text: "Embed69 reproduce a trav\xE9s de Kino Resolver (gratis). Inst\xE1lalo una vez y sirve para este y para otros plugins de sitios.", textEn: "Embed69 plays through Kino Resolver (free). Install it once and it works here and in other site plugins." },
-        { type: "ElevatedButton", key: "installResolver", labelText: "Instalar Kino Resolver", labelTextEn: "Install Kino Resolver", onPressed: { go: { installPlugin: { repo: RESOLVER_REPO } } } },
-        supportNode(device)
-      ] }
-    ] }
-  };
-}
-var browseInstance = null;
-var browseScreen = () => browseInstance ?? (browseInstance = makeBrowse({
+var std = null;
+var standard = () => std ?? (std = makeStandardScreen({
   kino,
-  // Inicio is the whole Home; Películas and Series are its rows of that kind.
+  name: "Embed69",
+  logo: LOGO,
+  logoAspect: LOGO_ASPECT,
+  needsResolver: true,
+  hasSettings: true,
+  tabs: [
+    { id: "inicio", label: "Inicio", labelEn: "Home" },
+    { id: "peliculas", label: "Pel\xEDculas", labelEn: "Movies" },
+    { id: "series", label: "Series", labelEn: "Series" }
+  ],
   loadTab: async (tab) => ({ rows: TAB_ROWS[tab] ? await rowsWithin(TAB_ROWS[tab]) : await home() })
 }));
 async function screen(ctx) {
   await null;
-  const c = ctx && typeof ctx === "object" ? ctx : {};
-  if (!(c.installed && c.installed[RESOLVER_REPO])) return installGateView(c.device);
-  return browseScreen().view(c);
+  return standard().screen(ctx && typeof ctx === "object" ? ctx : {});
 }
 async function screenEvent(ev) {
   await null;
-  return browseScreen().event(ev && typeof ev === "object" ? ev : {});
+  return standard().screenEvent(ev && typeof ev === "object" ? ev : {});
 }
 async function resolve(ref) {
-  if (!await resolverInstalled()) throw kino.error("unavailable", "resolver missing", { userMessage: t2("needResolver") });
+  if (!await resolverInstalled()) throw kino.error("unavailable", "resolver missing", { userMessage: t("needResolver") });
   const req = makeReq(kino, { deadline: Date.now() + RESOLVE_MS });
   if (ref.startsWith("cp:")) {
     const want = parseCopyRef(ref);
@@ -1648,12 +1094,12 @@ async function resolve(ref) {
     const copy = (await listCopies(want.title, { kino, req })).find((c) => c.lang === want.lang && c.server === want.server);
     const stream = copy ? await open(copy, req, { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS }) : null;
     if (copy) noteServer(copy.server, !!stream);
-    if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t2("noStreams") });
+    if (!stream) throw kino.error("not_found", "copy not available: " + want.lang + "/" + want.server, { userMessage: t("noStreams") });
     return stream;
   }
-  const title = await titleOf(ref);
+  const title = await titleOf2(ref);
   const copies = ordered(await listCopies(title, { kino, req }));
-  if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t2("noStreams") });
+  if (!copies.length) throw kino.error("not_found", "no copies for " + title.imdbId, { userMessage: t("noStreams") });
   const budget = { captures: MAX_CAPTURES, deadline: Date.now() + RESOLVE_MS };
   let main = null;
   for (const c of copies) {
@@ -1664,7 +1110,7 @@ async function resolve(ref) {
       break;
     }
   }
-  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t2("noStreams") });
+  if (!main) throw kino.error("not_found", "no copy opened for " + title.imdbId, { userMessage: t("noStreams") });
   const rest = copies.slice(copies.findIndex((c) => labelOf(c) === main.label) + 1);
   const alternatives = rest.slice(0, MAX_COPIES).map((c) => ({ label: labelOf(c), ref: copyRef(title, c) }));
   return { ...main, ...alternatives.length ? { alternatives } : {} };
@@ -1674,7 +1120,7 @@ async function action(key) {
     for (const k of kino.storage.keys()) {
       if (k.startsWith("imdb:")) kino.storage.remove(k);
     }
-    return { message: t2("cacheCleared") };
+    return { message: t("cacheCleared") };
   }
 }
 export {

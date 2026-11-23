@@ -1,8 +1,7 @@
 // What the browse screen shows, from the section pages the catalog already builds (catalog.js sectionPage): the featured
 // slides, the rails of a tab and the cards. Pure functions; index.js keeps the results and view.js draws them.
 
-export const TAB_IDS = ["inicio", "peliculas", "series"];
-export const MAX_SLIDES = 6;
+export const MAX_SLIDES = 5;
 export const MAX_RAILS = 8;
 export const MAX_RAIL_ITEMS = 20;
 const MAX_SLIDE_TEXT = 160;
@@ -23,22 +22,30 @@ export function cardOf(item) {
 }
 
 /**
- * Up to MAX_SLIDES featured titles: the first items, in row order, that have a backdrop and a synopsis, one per title.
+ * Up to MAX_SLIDES featured titles: the first items, in row order, that have a backdrop, one per title (every plugin has a hero:
+ * the synopsis is shown when the item has one, and is not required).
  * The synopsis is kept on the slide only (a card carries none).
  */
 export function slidesOf(rows) {
+  const byBackdrop = pickSlides(rows, (item) => item.backdrop);
+  // A source with no backdrops at all still gets its hero, from the posters.
+  return byBackdrop.length > 0 ? byBackdrop : pickSlides(rows, (item) => item.poster);
+}
+
+function pickSlides(rows, pictureOf) {
   const out = [];
   const seen = new Set();
   for (const row of rows) {
-    for (const item of row.items) {
+    for (const item of row.items || []) {
       if (out.length >= MAX_SLIDES) return out;
-      if (item.adult === true || seen.has(item.id) || !item.backdrop || !HTTPS.test(item.backdrop)) continue;
+      const image = pictureOf(item);
+      if (item.adult === true || seen.has(item.id) || !image || !HTTPS.test(image)) continue;
       const text = typeof item.overview === "string" ? item.overview.trim() : "";
-      if (text === "") continue;
       seen.add(item.id);
       out.push({
-        id: item.id, ref: item.ref, kind: item.kind, title: item.title, image: item.backdrop,
-        text: text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}…`,
+        id: item.id, ref: item.ref, kind: item.kind, title: item.title, image,
+        text: text === "" ? [item.year, item.rating ? "★ " + item.rating : null].filter(Boolean).join(" · ")
+          : text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}…`,
       });
     }
   }

@@ -87,7 +87,7 @@ test("the manifest is valid, consumes the shared resolver, and declares the site
   const out = validateManifest(readFileSync(new URL("../kino-plugin.json", import.meta.url), "utf8"));
   assert.ok(!out.errors?.length, JSON.stringify(out.errors));
   for (const h of ["embed69.org", "hglink.to", "vibuxer.com", "morencius.com", "voe.sx"]) assert.ok(manifest.hosts.includes(h), h);
-  assert.equal(manifest.apiVersion, 20);
+  assert.equal(manifest.apiVersion, 30);
   assert.ok(manifest.consumes && manifest.consumes.resolver, "consumes the resolver");
   assert.deepEqual(manifest.recommends, ["xuper-plugin/kino-plugin-kino-resolver"]);
   assert.equal(manifest.browser, true); // capture is the fallback for a gate host the resolver's inline pass cannot crack

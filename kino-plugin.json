@@ -1,8 +1,8 @@
 {
  "id": "embed69",
  "name": "Embed 69",
- "version": "1.5.1",
- "apiVersion": 20,
+ "version": "1.6.0",
+ "apiVersion": 30,
  "entry": "plugin.js",
  "icon": "icon.png",
  "description": "Películas y series en latino, castellano o subtituladas, a través de Embed 69.",
