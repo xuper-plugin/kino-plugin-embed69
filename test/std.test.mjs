@@ -246,3 +246,87 @@ test("imageHeaders go on every hero card and rail (a site whose pictures need it
   const none = nodes(await plain.screen({ state: await loaded(plain), device: "phone", installed }));
   assert.ok(none.filter((n) => n.type === "heroCard" || n.type === "titleRail").every((n) => n.headers === undefined));
 });
+
+const posterOnly = (n) => ({ id: "p" + n, ref: "s:" + n, title: "Show " + n, kind: "series", poster: "https://img/pp" + n + ".jpg" });
+
+test("a poster-only source: the slides come from TMDB's backdrops and synopses once known", async () => {
+  const k = fakeKino();
+  k.meta = async (q) => ({ ids: { tmdb: 7 }, backdrop: "https://tmdb/b-" + q.title + ".jpg", overview: "Synopsis of " + q.title, logo: "https://tmdb/l.png" });
+  k.meta.byTitle = true;
+  const s = make({ kino: k, loadTab: async () => ({ rows: [{ id: "r", title: "R", items: [posterOnly(1), posterOnly(2), posterOnly(3)] }] }) });
+  const tree = await s.screen({ state: await loaded(s), device: "phone", installed });
+  const slide = nodes(tree).find((n) => n.type === "heroCard");
+  assert.equal(slide.image, "https://tmdb/b-Show 1.jpg");
+  assert.equal(slide.text, "Synopsis of Show 1");
+});
+
+test("a poster-only source with no TMDB: still a hero, from the posters", async () => {
+  const s = make({ loadTab: async () => ({ rows: [{ id: "r", title: "R", items: [posterOnly(1), posterOnly(2)] }] }) });
+  const tree = await s.screen({ state: await loaded(s), device: "phone", installed });
+  assert.equal(nodes(tree).find((n) => n.type === "heroCard").image, "https://img/pp1.jpg");
+});
+
+test("TMDB lookups run three at a time", async () => {
+  const k = fakeKino();
+  let live = 0, peak = 0;
+  k.meta = async () => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 5)); live--; return { ids: { tmdb: 1 } }; };
+  k.meta.byTitle = true;
+  const items = Array.from({ length: 9 }, (_, i) => item(i + 1));
+  const s = make({ kino: k, loadTab: async () => ({ rows: [{ id: "r", title: "R", items }] }) });
+  await loaded(s);
+  assert.equal(peak, 3);
+});
+
+test("a rail where only some cards have a backdrop draws them all as posters (one card shape per rail)", async () => {
+  const s = make({ loadTab: async () => ({ rows: [{ id: "r", title: "R", items: [item(1), posterOnly(2)] }] }) });
+  const rail = nodes(await s.screen({ state: await loaded(s), device: "phone", installed })).find((n) => n.type === "titleRail");
+  assert.ok(rail.items.every((c) => c.backdrop === undefined));
+});
+
+// The kit's own checks (the same rules Kino applies): a plugin's copy uses its sdk/, the golden copy the app's kit.
+import fs from "node:fs";
+const kitUrl = fs.existsSync(new URL("../sdk/screen.mjs", import.meta.url)) ? new URL("../sdk/screen.mjs", import.meta.url).href
+  : "file:///C:/dev/kino-app/plugins/sdk/screen.mjs";
+const kit = await import(kitUrl);
+const SETTINGS = [{ key: "site", type: "text", label: "Sitio", labelEn: "Site", default: "https://x.example" }];
+const fold = (v) => JSON.parse(JSON.stringify(v));
+
+test("Kino drops nothing of any tree or answer: phone and TV, Spanish and English, gate, browse and settings", async () => {
+  for (const device of ["phone", "tv"]) {
+    for (const lang of ["es", "en"]) {
+      const s = make({ tabs: [{ id: "a", label: "A", labelEn: "A" }, { id: "b", label: "B", labelEn: "B" }], imageHeaders: { Referer: "https://x.example/" } });
+      const state = await loaded(s, device);
+      const trees = {
+        browse: await s.screen({ state, device, installed }),
+        settings: await s.screen({ state, route: { name: "settings" }, device, installed }),
+        gate: await s.screen({ state: {}, device, installed: {} }),
+      };
+      for (const [name, tree] of Object.entries(trees)) {
+        const r = kit.checkScreenTree(fold(tree), lang, undefined, { apiVersion: 30, settings: SETTINGS });
+        assert.deepEqual(r.dropped, [], `${device}/${lang}/${name}`);
+      }
+      for (const [name, ev] of [["search", { name: "search", value: "dune", state: {}, device }], ["openSettings", { name: "openSettings", state: {} }], ["tab", { name: "tab", value: "b", state }]]) {
+        const r = kit.checkScreenAnswer(fold(await s.screenEvent(ev)), lang, {});
+        assert.deepEqual(r.dropped, [], `${device}/${lang}/answer ${name}`);
+      }
+    }
+  }
+});
+
+test("a row marked hidden feeds the slides only: it is not drawn as a rail", async () => {
+  const s = make({ loadTab: async () => ({ rows: [
+    { id: "carousel", title: "", hidden: true, items: [item(7), item(8)] },
+    { id: "r", title: "Estrenos", items: [posterOnly(1), posterOnly(2)] },
+  ] }) });
+  const all = nodes(await s.screen({ state: await loaded(s), device: "phone", installed }));
+  const rails = all.filter((n) => n.type === "titleRail");
+  assert.deepEqual(rails.map((r) => r.title), ["Estrenos"]);
+  assert.equal(all.find((n) => n.type === "heroCard").title, "Title 7");
+});
+
+test("a row's English title reaches its rail", async () => {
+  const s = make({ loadTab: async () => ({ rows: [{ id: "r", title: "Recién agregadas", titleEn: "Recently added", items: [item(1)] }] }) });
+  const rail = nodes(await s.screen({ state: await loaded(s), device: "phone", installed })).find((n) => n.type === "titleRail");
+  assert.equal(rail.title, "Recién agregadas");
+  assert.equal(rail.titleEn, "Recently added");
+});

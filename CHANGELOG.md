@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2
+
+- The standard screen catches up: a hero from TMDB backdrops when the site has none, TMDB lookups three at a time, one card shape per rail, a row's English title (std 1.5.1)
+
 ## 1.6.1
 
 - Cards get their TMDB id again and slides their title logo (std 1.3.0): std 1.1.0 had stopped every TMDB lookup.

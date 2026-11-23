@@ -22,14 +22,19 @@ export function cardOf(item) {
 }
 
 /**
- * Up to MAX_SLIDES featured titles: the first items, in row order, that have a backdrop, one per title (every plugin has a hero:
- * the synopsis is shown when the item has one, and is not required).
- * The synopsis is kept on the slide only (a card carries none).
+ * Up to MAX_SLIDES featured titles: the first items, in row order, that have a backdrop, one per title (the synopsis is shown
+ * when the item has one, and is not required). The synopsis is kept on the slide only (a card carries none).
  */
-export function slidesOf(rows) {
-  const byBackdrop = pickSlides(rows, (item) => item.backdrop);
-  // A source with no backdrops at all still gets its hero, from the posters.
-  return byBackdrop.length > 0 ? byBackdrop : pickSlides(rows, (item) => item.poster);
+export const slidesOf = (rows) => pickSlides(rows, (item) => item.backdrop);
+
+/** The last resort of a source with no backdrops and no TMDB match: slides from the posters, so every plugin has a hero. */
+export const posterSlidesOf = (rows) => pickSlides(rows, (item) => item.poster);
+
+/** Slide text: the synopsis cut to MAX_SLIDE_TEXT, else the year and rating. */
+export function slideText(overview, item = {}) {
+  const text = typeof overview === "string" ? overview.trim() : "";
+  if (text === "") return [item.year, item.rating ? "★ " + item.rating : null].filter(Boolean).join(" · ");
+  return text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}…`;
 }
 
 function pickSlides(rows, pictureOf) {
@@ -40,22 +45,21 @@ function pickSlides(rows, pictureOf) {
       if (out.length >= MAX_SLIDES) return out;
       const image = pictureOf(item);
       if (item.adult === true || seen.has(item.id) || !image || !HTTPS.test(image)) continue;
-      const text = typeof item.overview === "string" ? item.overview.trim() : "";
       seen.add(item.id);
-      out.push({
-        id: item.id, ref: item.ref, kind: item.kind, title: item.title, image,
-        text: text === "" ? [item.year, item.rating ? "★ " + item.rating : null].filter(Boolean).join(" · ")
-          : text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}…`,
-      });
+      out.push({ id: item.id, ref: item.ref, kind: item.kind, title: item.title, image, text: slideText(item.overview, item) });
     }
   }
   return out;
 }
 
+/** One card shape per rail: Kino draws a card with a backdrop wide, so a rail where only some have one loses them all. */
+const uniform = (items) => (items.every((i) => i.backdrop) ? items : items.map(({ backdrop, ...rest }) => rest));
+
 /** The tab's rails: its rows trimmed to what a screen draws. */
 export function railsOf(rows) {
-  return rows.filter((r) => r.items && r.items.length > 0).slice(0, MAX_RAILS).map((r) => ({
-    id: r.id, title: r.title, ...(r.ref ? { ref: r.ref } : {}), items: r.items.slice(0, MAX_RAIL_ITEMS).map(cardOf),
+  // A row marked `hidden` (a site carousel) feeds the slides only.
+  return rows.filter((r) => !r.hidden && r.items && r.items.length > 0).slice(0, MAX_RAILS).map((r) => ({
+    id: r.id, title: r.title, ...(r.titleEn ? { titleEn: r.titleEn } : {}), ...(r.ref ? { ref: r.ref } : {}), items: uniform(r.items.slice(0, MAX_RAIL_ITEMS).map(cardOf)),
   }));
 }
 
@@ -64,7 +68,8 @@ export function tabOf(page) {
   const rows = page && Array.isArray(page.rows) ? page.rows : [];
   const rails = railsOf(rows);
   if (rails.length === 0) return null;
-  return { slides: slidesOf(rows), rails };
+  // Slides are picked from the rows before uniform() drops a rail's backdrops.
+  return { slides: slidesOf(rows), posterSlides: posterSlidesOf(rows), rails };
 }
 
 /** The key a played ref is remembered under: a TMDB title (a movie, a series or one of its episodes) by its id, else the ref. */

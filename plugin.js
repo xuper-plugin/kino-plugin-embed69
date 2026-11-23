@@ -146,9 +146,12 @@ function cardOf(item) {
   if (item.adult === true) out.adult = true;
   return out;
 }
-function slidesOf(rows) {
-  const byBackdrop = pickSlides(rows, (item) => item.backdrop);
-  return byBackdrop.length > 0 ? byBackdrop : pickSlides(rows, (item) => item.poster);
+var slidesOf = (rows) => pickSlides(rows, (item) => item.backdrop);
+var posterSlidesOf = (rows) => pickSlides(rows, (item) => item.poster);
+function slideText(overview, item = {}) {
+  const text = typeof overview === "string" ? overview.trim() : "";
+  if (text === "") return [item.year, item.rating ? "\u2605 " + item.rating : null].filter(Boolean).join(" \xB7 ");
+  return text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}\u2026`;
 }
 function pickSlides(rows, pictureOf) {
   const out = [];
@@ -158,33 +161,27 @@ function pickSlides(rows, pictureOf) {
       if (out.length >= MAX_SLIDES) return out;
       const image = pictureOf(item);
       if (item.adult === true || seen.has(item.id) || !image || !HTTPS.test(image)) continue;
-      const text = typeof item.overview === "string" ? item.overview.trim() : "";
       seen.add(item.id);
-      out.push({
-        id: item.id,
-        ref: item.ref,
-        kind: item.kind,
-        title: item.title,
-        image,
-        text: text === "" ? [item.year, item.rating ? "\u2605 " + item.rating : null].filter(Boolean).join(" \xB7 ") : text.length <= MAX_SLIDE_TEXT ? text : `${text.slice(0, MAX_SLIDE_TEXT - 1).trimEnd()}\u2026`
-      });
+      out.push({ id: item.id, ref: item.ref, kind: item.kind, title: item.title, image, text: slideText(item.overview, item) });
     }
   }
   return out;
 }
+var uniform = (items) => items.every((i) => i.backdrop) ? items : items.map(({ backdrop, ...rest }) => rest);
 function railsOf(rows) {
-  return rows.filter((r) => r.items && r.items.length > 0).slice(0, MAX_RAILS).map((r) => ({
+  return rows.filter((r) => !r.hidden && r.items && r.items.length > 0).slice(0, MAX_RAILS).map((r) => ({
     id: r.id,
     title: r.title,
+    ...r.titleEn ? { titleEn: r.titleEn } : {},
     ...r.ref ? { ref: r.ref } : {},
-    items: r.items.slice(0, MAX_RAIL_ITEMS).map(cardOf)
+    items: uniform(r.items.slice(0, MAX_RAIL_ITEMS).map(cardOf))
   }));
 }
 function tabOf(page) {
   const rows = page && Array.isArray(page.rows) ? page.rows : [];
   const rails = railsOf(rows);
   if (rails.length === 0) return null;
-  return { slides: slidesOf(rows), rails };
+  return { slides: slidesOf(rows), posterSlides: posterSlidesOf(rows), rails };
 }
 function playedKey(ref) {
   const m = /^(?:m|s|e):(\d{1,10})(?::|$)/.exec(String(ref || ""));
@@ -413,8 +410,10 @@ function gateView(cfg, device = "phone") {
 }
 
 // src/std/metaCache.js
-var KEY = "meta2";
-var MAX = 120;
+var KEY = "meta3";
+var MAX = 160;
+var CONCURRENCY = 3;
+var OVERVIEW_MAX = 160;
 var HTTPS2 = /^https:\/\//;
 function makeMetaCache({ kino: kino2, titleOf: titleOf3 = (c) => c.title, typeOf = (c) => c.kind === "series" ? "series" : "movie", tmdbPictures = false, clock = { now: () => Date.now() } }) {
   const usable = () => {
@@ -450,9 +449,11 @@ function makeMetaCache({ kino: kino2, titleOf: titleOf3 = (c) => c.title, typeOf
       ...e.t > 0 ? { tmdb: e.t } : {},
       ...e.l && HTTPS2.test(e.l) ? { logo: e.l } : {},
       ...e.p && HTTPS2.test(e.p) ? { poster: e.p } : {},
-      ...e.b && HTTPS2.test(e.b) ? { backdrop: e.b } : {}
+      ...e.b && HTTPS2.test(e.b) ? { backdrop: e.b } : {},
+      ...typeof e.o === "string" && e.o ? { overview: e.o } : {}
     };
   }
+  const asked = (id) => Object.hasOwn(read(), id);
   function dress(cards) {
     return cards.map((c) => {
       const k = known(c.id);
@@ -465,29 +466,40 @@ function makeMetaCache({ kino: kino2, titleOf: titleOf3 = (c) => c.title, typeOf
     if (!usable()) return 0;
     const b = read();
     const end = clock.now() + budgetMs;
-    let asked = 0;
-    for (const c of cards) {
-      if (clock.now() >= end) break;
-      if (!c || typeof c.id !== "string" || Object.hasOwn(b, c.id) || c.ids && c.ids.tmdb && c.noLogo) continue;
-      const year = c.year !== void 0 ? { year: c.year } : {};
-      try {
-        const a = await kino2.meta({ type: typeOf(c), title: titleOf3(c), ...year });
-        b[c.id] = {
-          t: a && a.ids && Number.isInteger(a.ids.tmdb) ? a.ids.tmdb : 0,
-          l: a && typeof a.logo === "string" ? a.logo : "",
-          p: a && typeof a.poster === "string" ? a.poster : "",
-          b: a && typeof a.backdrop === "string" ? a.backdrop : ""
-        };
-      } catch (e) {
-        if (e && e.code === "rate_limited") break;
-        continue;
+    let count = 0;
+    let stop = false;
+    const seen = /* @__PURE__ */ new Set();
+    const todo = cards.filter((c) => {
+      if (!c || typeof c.id !== "string" || seen.has(c.id) || Object.hasOwn(b, c.id) || c.ids && c.ids.tmdb && c.noLogo) return false;
+      seen.add(c.id);
+      return true;
+    });
+    let next = 0;
+    const str = (v, max) => typeof v === "string" ? v.slice(0, max) : "";
+    const worker = async () => {
+      while (!stop && next < todo.length && clock.now() < end) {
+        const c = todo[next++];
+        const year = c.year !== void 0 ? { year: c.year } : {};
+        try {
+          const a = await kino2.meta({ type: typeOf(c), title: titleOf3(c), ...year });
+          b[c.id] = {
+            t: a && a.ids && Number.isInteger(a.ids.tmdb) ? a.ids.tmdb : 0,
+            l: str(a && a.logo, 2048),
+            p: str(a && a.poster, 2048),
+            b: str(a && a.backdrop, 2048),
+            o: str(a && a.overview, OVERVIEW_MAX)
+          };
+          count++;
+        } catch (e) {
+          if (e && e.code === "rate_limited") stop = true;
+        }
       }
-      asked++;
-    }
-    if (asked > 0) write();
-    return asked;
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (count > 0) write();
+    return count;
   }
-  return { known, dress, fill: fill2, usable, tmdbPictures };
+  return { known, asked, dress, fill: fill2, usable, tmdbPictures };
 }
 
 // src/std/index.js
@@ -499,19 +511,39 @@ var RECENT_KEY = "recent1";
 var RECENT_MAX = 12;
 var Q_MAX = 200;
 var META_TICK_MS = 3e3;
+var MAX_META_TICKS = 10;
 var DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
 function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf: titleOf3, typeOf, tmdbPictures = false, imageHeaders = null }) {
   const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t2) => t2.id);
   const meta = makeMetaCache({ kino: kino2, titleOf: titleOf3, typeOf, tmdbPictures });
-  const enrich = (data) => data ? {
-    slides: data.slides.map((s) => {
+  function slidesFromMeta(rails) {
+    const out = [];
+    for (const r of rails) {
+      for (const c of r.items) {
+        if (out.length >= MAX_SLIDES) return out;
+        const k = meta.known(c.id);
+        if (!k.backdrop || c.adult === true || out.some((x) => x.id === c.id)) continue;
+        out.push({ id: c.id, ref: c.ref, kind: c.kind, title: c.title, image: k.backdrop, text: slideText(k.overview, c), ...k.logo ? { logo: k.logo } : {} });
+      }
+    }
+    return out;
+  }
+  const enrich = (data) => {
+    if (!data) return data;
+    const own = data.slides.map((s) => {
       const k = meta.known(s.id);
       const image = tmdbPictures && k.backdrop ? k.backdrop : null;
       return k.logo || image ? { ...s, ...k.logo ? { logo: k.logo } : {}, ...image ? { image } : {} } : s;
-    }),
-    rails: data.rails.map((r) => ({ ...r, items: meta.dress(r.items) }))
-  } : data;
+    });
+    const learned = own.length > 0 ? [] : slidesFromMeta(data.rails);
+    return {
+      // The site's own backdrops, else TMDB's, else the posters: every plugin has a hero.
+      slides: own.length > 0 ? own : learned.length > 0 ? learned : data.posterSlides || [],
+      rails: data.rails.map((r) => ({ ...r, items: meta.dress(r.items) }))
+    };
+  };
+  const metaTicks = /* @__PURE__ */ new Map();
   const memo = /* @__PURE__ */ new Map();
   const log = (...a) => {
     try {
@@ -542,7 +574,7 @@ function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect
   }
   function writeSnap(tab, data) {
     for (let per = 10; per >= 3; per -= 2) {
-      const slim = { slides: data.slides, rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
+      const slim = { slides: data.slides, posterSlides: data.posterSlides || [], rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
       const text = JSON.stringify({ at: Date.now(), data: slim });
       if (text.length <= SNAP_MAX) {
         set(SNAP_PREFIX + tab, text, { ttlMs: SNAP_TTL_MS });
@@ -643,9 +675,17 @@ function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect
       const [next, ...rest] = pending;
       const failed = { ...state.failed || {} };
       if (next.startsWith("meta:")) {
-        const m = memo.get(next.slice(5));
-        if (m) await meta.fill([...m.data.slides.map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...m.data.rails.flatMap((r) => r.items.slice(0, 6).map((x) => ({ id: x.id, title: x.title, kind: x.kind })))], META_TICK_MS);
-        return { state: { pending: rest } };
+        const tab = next.slice(5);
+        const m = memo.get(tab);
+        if (!m) return { state: { pending: rest } };
+        const ask = (x) => ({ id: x.id, title: x.title, kind: x.kind, ...x.year !== void 0 ? { year: x.year } : {} });
+        const noOwnSlides = m.data.slides.length === 0;
+        const cards = [...m.data.slides.map(ask), ...m.data.rails.flatMap((r) => r.items.slice(0, noOwnSlides ? MAX_SLIDES * 3 : 6).map(ask))];
+        const count = await meta.fill(cards, META_TICK_MS);
+        const ticks = (metaTicks.get(tab) || 0) + 1;
+        metaTicks.set(tab, ticks);
+        const again = noOwnSlides && count > 0 && ticks < MAX_META_TICKS && slidesFromMeta(m.data.rails).length < MAX_SLIDES && cards.some((c) => !meta.asked(c.id));
+        return { state: { pending: again ? [next, ...rest] : rest } };
       }
       try {
         const ok = await load(next);

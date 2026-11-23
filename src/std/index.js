@@ -1,4 +1,4 @@
-// std 1.3.0 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
+// std 1.5.1 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
 // Copy this folder as it is into a plugin's src/std/; a change goes to the golden copy first, then to every plugin.
 //
 // It paints at once from what is kept, then fills each tab as the source answers:
@@ -9,7 +9,7 @@
 // - Tabs other than the active one are prefetched except on a TV (a weak box pays for every row it builds).
 // The bar's search hands the words to Kino's own search (this plugin as the source); a card or a slide opens Kino's own title
 // page. Ajustes is a page with Kino's own form of the plugin's settings and the donation.
-import { tabOf, recentOf, playedKey } from "./model.js";
+import { tabOf, recentOf, playedKey, slideText, MAX_SLIDES } from "./model.js";
 import { browseView, settingsView, gateView, searchClosedOps, RESOLVER_REPO } from "./view.js";
 import { makeMetaCache } from "./metaCache.js";
 
@@ -22,6 +22,9 @@ const RECENT_MAX = 12;
 const Q_MAX = 200;
 // One tick's TMDB lookups: short, because the screen's events wait in line behind it (the titles left are asked on a later opening).
 const META_TICK_MS = 3_000;
+// A tab with no slides of its own asks TMDB again on the next tick, until MAX_SLIDES are known, every title was asked or this
+// many ticks passed.
+const MAX_META_TICKS = 10;
 const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
 
 /**
@@ -37,14 +40,34 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
   const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t) => t.id);
   const meta = makeMetaCache({ kino, titleOf, typeOf, tmdbPictures });
-  const enrich = (data) => (data ? {
-    slides: data.slides.map((s) => {
+  /** A source with no backdrops: slides from the first titles TMDB knows a backdrop for (with its synopsis and logo). */
+  function slidesFromMeta(rails) {
+    const out = [];
+    for (const r of rails) {
+      for (const c of r.items) {
+        if (out.length >= MAX_SLIDES) return out;
+        const k = meta.known(c.id);
+        if (!k.backdrop || c.adult === true || out.some((x) => x.id === c.id)) continue;
+        out.push({ id: c.id, ref: c.ref, kind: c.kind, title: c.title, image: k.backdrop, text: slideText(k.overview, c), ...(k.logo ? { logo: k.logo } : {}) });
+      }
+    }
+    return out;
+  }
+  const enrich = (data) => {
+    if (!data) return data;
+    const own = data.slides.map((s) => {
       const k = meta.known(s.id);
       const image = tmdbPictures && k.backdrop ? k.backdrop : null;
       return k.logo || image ? { ...s, ...(k.logo ? { logo: k.logo } : {}), ...(image ? { image } : {}) } : s;
-    }),
-    rails: data.rails.map((r) => ({ ...r, items: meta.dress(r.items) })),
-  } : data);
+    });
+    const learned = own.length > 0 ? [] : slidesFromMeta(data.rails);
+    return {
+      // The site's own backdrops, else TMDB's, else the posters: every plugin has a hero.
+      slides: own.length > 0 ? own : learned.length > 0 ? learned : data.posterSlides || [],
+      rails: data.rails.map((r) => ({ ...r, items: meta.dress(r.items) })),
+    };
+  };
+  const metaTicks = new Map(); // tab -> TMDB ticks run in this sandbox
   const memo = new Map(); // tab -> { data, whole: loaded in this sandbox }
   const log = (...a) => { try { kino.log("[std]", ...a); } catch (_) { /* no log */ } };
   const get = (k) => { try { return kino.storage.get(k); } catch (_) { return null; } };
@@ -58,7 +81,7 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
   }
   function writeSnap(tab, data) {
     for (let per = 10; per >= 3; per -= 2) {
-      const slim = { slides: data.slides, rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
+      const slim = { slides: data.slides, posterSlides: data.posterSlides || [], rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
       const text = JSON.stringify({ at: Date.now(), data: slim });
       if (text.length <= SNAP_MAX) { set(SNAP_PREFIX + tab, text, { ttlMs: SNAP_TTL_MS }); return; }
     }
@@ -148,9 +171,18 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
       const failed = { ...(state.failed || {}) };
       // The TMDB ids and title logos of a tab's first titles (slides first), a few lookups per tick.
       if (next.startsWith("meta:")) {
-        const m = memo.get(next.slice(5));
-        if (m) await meta.fill([...m.data.slides.map((s) => ({ id: s.id, title: s.title, kind: s.kind })), ...m.data.rails.flatMap((r) => r.items.slice(0, 6).map((x) => ({ id: x.id, title: x.title, kind: x.kind })))], META_TICK_MS);
-        return { state: { pending: rest } };
+        const tab = next.slice(5);
+        const m = memo.get(tab);
+        if (!m) return { state: { pending: rest } };
+        const ask = (x) => ({ id: x.id, title: x.title, kind: x.kind, ...(x.year !== undefined ? { year: x.year } : {}) });
+        const noOwnSlides = m.data.slides.length === 0;
+        // Without slides of its own a tab needs TMDB backdrops: more of its titles are asked, in row order.
+        const cards = [...m.data.slides.map(ask), ...m.data.rails.flatMap((r) => r.items.slice(0, noOwnSlides ? MAX_SLIDES * 3 : 6).map(ask))];
+        const count = await meta.fill(cards, META_TICK_MS);
+        const ticks = (metaTicks.get(tab) || 0) + 1;
+        metaTicks.set(tab, ticks);
+        const again = noOwnSlides && count > 0 && ticks < MAX_META_TICKS && slidesFromMeta(m.data.rails).length < MAX_SLIDES && cards.some((c) => !meta.asked(c.id));
+        return { state: { pending: again ? [next, ...rest] : rest } };
       }
       try {
         const ok = await load(next);
