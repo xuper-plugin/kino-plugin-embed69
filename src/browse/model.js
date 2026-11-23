@@ -1,7 +1,7 @@
 // What the browse screen shows, from the section pages the catalog already builds (catalog.js sectionPage): the featured
 // slides, the rails of a tab and the cards. Pure functions; index.js keeps the results and view.js draws them.
 
-export const TAB_IDS = ["inicio"];
+export const TAB_IDS = ["inicio", "peliculas", "series"];
 export const MAX_SLIDES = 6;
 export const MAX_RAILS = 8;
 export const MAX_RAIL_ITEMS = 20;

@@ -12,6 +12,12 @@ import { listCopies, SITE, hasTitle } from "./embed69.js";
 import { makeReq, UA } from "./util/http.js";
 import { makeBrowse } from "./browse/index.js";
 
+/**
+ * kino.tmdb in the person's language. Kino fills the language from the call's turn, and a call from the screen's timers has no
+ * turn: TMDB then answered in English (the browse screen's hero read "On Halloween night…" on a Spanish Kino, Redmi 2026-11-22).
+ */
+const tmdb = (path, params = {}) => kino.tmdb(path, { language: String(kino.lang || "").toLowerCase().startsWith("en") ? "en-US" : "es-MX", ...params });
+
 // Kino waits for every request a call left running before it delivers the call's answer; ask it to drop them once the call settles.
 globalThis.__kinoDropPendingFetches = true;
 
@@ -167,7 +173,7 @@ const HOME_ROWS = [
 const DISCOVER = { sort_by: "popularity.desc", "vote_count.gte": 200 };
 
 async function homeRow(row) {
-  const res = await kino.tmdb(row.path, { ...(row.path.startsWith("/discover") ? DISCOVER : {}), ...(row.params || {}) });
+  const res = await tmdb(row.path, { ...(row.path.startsWith("/discover") ? DISCOVER : {}), ...(row.params || {}) });
   // a row of posters: what has none looks broken
   const items = (res?.results || []).filter((r) => r.poster_path).slice(0, 20).map((r) => itemFromTmdb(r, row.kind));
   return items.length ? { id: row.id, title: t(row.title), genre: row.genre, ref: row.ref, items } : null;
@@ -176,11 +182,21 @@ async function homeRow(row) {
 /** Kino cuts a Home at 20 s: the rows still loading by then are left off and the ones that loaded are shown. */
 const HOME_BUDGET_MS = 14000;
 
+/** The rows of the browse screen's Películas and Series tabs: the Home rows of that kind (anime goes with Series). */
+const TAB_ROWS = {
+  peliculas: HOME_ROWS.filter((r) => r.kind === "movie"),
+  series: HOME_ROWS.filter((r) => r.kind === "tv"),
+};
+
 export async function home() {
-  // Every row on its own: one that fails or comes back empty is left out, the rest of the Home is still shown.
-  const out = HOME_ROWS.map(() => null);
+  return rowsWithin(HOME_ROWS);
+}
+
+/** [defs] loaded each on its own: one that fails or comes back empty is left out, the rest are still shown (by HOME_BUDGET_MS). */
+async function rowsWithin(defs) {
+  const out = defs.map(() => null);
   let done = false;
-  const all = Promise.all(HOME_ROWS.map((row, i) => homeRow(row).then((r) => { out[i] = r; }, () => {}))).then(() => { done = true; });
+  const all = Promise.all(defs.map((row, i) => homeRow(row).then((r) => { out[i] = r; }, () => {}))).then(() => { done = true; });
   const end = Date.now() + HOME_BUDGET_MS;
   while (!done && Date.now() < end) await Promise.race([all, kino.sleep(Math.min(250, Math.max(1, end - Date.now())))]);
   const rows = out.filter(Boolean);
@@ -213,15 +229,15 @@ export async function search(query) {
   const type = query.type;
   let ranked;
   if (type === "series") {
-    const res = await kino.tmdb("/search/tv", { query: query.q });
+    const res = await tmdb("/search/tv", { query: query.q });
     ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
   } else if (type === "movie") {
-    const res = await kino.tmdb("/search/movie", { query: query.q });
+    const res = await tmdb("/search/movie", { query: query.q });
     ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
   } else {
     const [movies, tv] = await Promise.all([
-      kino.tmdb("/search/movie", { query: query.q }),
-      kino.tmdb("/search/tv", { query: query.q }),
+      tmdb("/search/movie", { query: query.q }),
+      tmdb("/search/tv", { query: query.q }),
     ]);
     const all = [
       ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
@@ -261,7 +277,7 @@ export async function browse(ref, cursor) {
     return { items: [] };
   }
 
-  const res = await kino.tmdb(path, params);
+  const res = await tmdb(path, params);
   const items = (res?.results || []).filter((r) => r.poster_path).map((r) => itemFromTmdb(r, kind));
   const next = res?.page < res?.total_pages ? String(page + 1) : undefined;
   return { items, next };
@@ -270,7 +286,7 @@ export async function browse(ref, cursor) {
 // ---- categories ----
 
 export async function categories() {
-  const [mg, tg] = await Promise.all([kino.tmdb("/genre/movie/list"), kino.tmdb("/genre/tv/list")]);
+  const [mg, tg] = await Promise.all([tmdb("/genre/movie/list"), tmdb("/genre/tv/list")]);
   const cats = [];
   for (const g of (mg?.genres || []).slice(0, 12)) cats.push({ id: "gm" + g.id, title: g.name, ref: "genre:movie:" + g.id });
   for (const g of (tg?.genres || []).slice(0, 8)) cats.push({ id: "gt" + g.id, title: g.name + " (series)", ref: "genre:tv:" + g.id });
@@ -472,7 +488,8 @@ function installGateView(device) {
 let browseInstance = null;
 const browseScreen = () => (browseInstance ??= makeBrowse({
   kino,
-  loadTab: async () => ({ rows: await home() }),
+  // Inicio is the whole Home; Películas and Series are its rows of that kind.
+  loadTab: async (tab) => ({ rows: TAB_ROWS[tab] ? await rowsWithin(TAB_ROWS[tab]) : await home() }),
 }));
 
 /** `screen(ctx)`: the install gate while the resolver is missing, the rich browse screen once it is there. */

@@ -129,7 +129,7 @@ function makeReq(kino2, { deadline }) {
 }
 
 // src/browse/model.js
-var TAB_IDS = ["inicio"];
+var TAB_IDS = ["inicio", "peliculas", "series"];
 var MAX_SLIDES = 6;
 var MAX_RAILS = 8;
 var MAX_RAIL_ITEMS = 20;
@@ -1212,6 +1212,7 @@ function makeBrowse({ kino: kino2, loadTab }) {
 }
 
 // src/plugin.js
+var tmdb = (path, params = {}) => kino.tmdb(path, { language: String(kino.lang || "").toLowerCase().startsWith("en") ? "en-US" : "es-MX", ...params });
 globalThis.__kinoDropPendingFetches = true;
 if (typeof kino.meta !== "function") throw kino.error("unavailable", "kino.meta not available");
 if (typeof kino.tmdb !== "function") throw kino.error("unavailable", "kino.tmdb not available");
@@ -1355,15 +1356,22 @@ var HOME_ROWS = [
 ];
 var DISCOVER = { sort_by: "popularity.desc", "vote_count.gte": 200 };
 async function homeRow(row) {
-  const res = await kino.tmdb(row.path, { ...row.path.startsWith("/discover") ? DISCOVER : {}, ...row.params || {} });
+  const res = await tmdb(row.path, { ...row.path.startsWith("/discover") ? DISCOVER : {}, ...row.params || {} });
   const items = (res?.results || []).filter((r) => r.poster_path).slice(0, 20).map((r) => itemFromTmdb(r, row.kind));
   return items.length ? { id: row.id, title: t2(row.title), genre: row.genre, ref: row.ref, items } : null;
 }
 var HOME_BUDGET_MS = 14e3;
+var TAB_ROWS = {
+  peliculas: HOME_ROWS.filter((r) => r.kind === "movie"),
+  series: HOME_ROWS.filter((r) => r.kind === "tv")
+};
 async function home() {
-  const out = HOME_ROWS.map(() => null);
+  return rowsWithin(HOME_ROWS);
+}
+async function rowsWithin(defs) {
+  const out = defs.map(() => null);
   let done = false;
-  const all = Promise.all(HOME_ROWS.map((row, i) => homeRow(row).then((r) => {
+  const all = Promise.all(defs.map((row, i) => homeRow(row).then((r) => {
     out[i] = r;
   }, () => {
   }))).then(() => {
@@ -1395,15 +1403,15 @@ async function search(query) {
   const type = query.type;
   let ranked;
   if (type === "series") {
-    const res = await kino.tmdb("/search/tv", { query: query.q });
+    const res = await tmdb("/search/tv", { query: query.q });
     ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "tv")), titlesOf(query));
   } else if (type === "movie") {
-    const res = await kino.tmdb("/search/movie", { query: query.q });
+    const res = await tmdb("/search/movie", { query: query.q });
     ranked = kino.rank.filterRelevant((res?.results || []).map((r) => itemFromTmdb(r, "movie")), titlesOf(query));
   } else {
     const [movies, tv] = await Promise.all([
-      kino.tmdb("/search/movie", { query: query.q }),
-      kino.tmdb("/search/tv", { query: query.q })
+      tmdb("/search/movie", { query: query.q }),
+      tmdb("/search/tv", { query: query.q })
     ]);
     const all = [
       ...(movies?.results || []).map((r) => itemFromTmdb(r, "movie")),
@@ -1437,13 +1445,13 @@ async function browse(ref, cursor) {
   } else {
     return { items: [] };
   }
-  const res = await kino.tmdb(path, params);
+  const res = await tmdb(path, params);
   const items = (res?.results || []).filter((r) => r.poster_path).map((r) => itemFromTmdb(r, kind));
   const next = res?.page < res?.total_pages ? String(page + 1) : void 0;
   return { items, next };
 }
 async function categories() {
-  const [mg, tg] = await Promise.all([kino.tmdb("/genre/movie/list"), kino.tmdb("/genre/tv/list")]);
+  const [mg, tg] = await Promise.all([tmdb("/genre/movie/list"), tmdb("/genre/tv/list")]);
   const cats = [];
   for (const g of (mg?.genres || []).slice(0, 12)) cats.push({ id: "gm" + g.id, title: g.name, ref: "genre:movie:" + g.id });
   for (const g of (tg?.genres || []).slice(0, 8)) cats.push({ id: "gt" + g.id, title: g.name + " (series)", ref: "genre:tv:" + g.id });
@@ -1618,7 +1626,8 @@ function installGateView(device) {
 var browseInstance = null;
 var browseScreen = () => browseInstance ?? (browseInstance = makeBrowse({
   kino,
-  loadTab: async () => ({ rows: await home() })
+  // Inicio is the whole Home; Películas and Series are its rows of that kind.
+  loadTab: async (tab) => ({ rows: TAB_ROWS[tab] ? await rowsWithin(TAB_ROWS[tab]) : await home() })
 }));
 async function screen(ctx) {
   await null;
