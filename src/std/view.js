@@ -57,8 +57,11 @@ const heroSkeleton = () => ({ type: "Skeleton", key: "heroSkeleton", shape: "blo
 
 const titleOf = (s) => ({ ref: s.ref, kind: s.kind, id: s.id, title: s.title });
 
-const slideNode = (s) => ({
-  type: "heroCard", key: "slide-" + s.id, h: { compact: 200, expanded: 240 }, ...(s.logo ? { logo: s.logo } : {}), title: s.title, text: s.text, image: s.image,
+// `headers`: what the pictures are asked with (Kino 0.9.83+, only to the manifest's hosts), for a site whose images need its Referer.
+const withHeaders = (headers) => (headers ? { headers } : {});
+
+const slideNode = (s, headers) => ({
+  type: "heroCard", key: "slide-" + s.id, h: { compact: 200, expanded: 240 }, ...(s.logo ? { logo: s.logo } : {}), title: s.title, text: s.text, image: s.image, ...withHeaders(headers),
   buttons: [
     { type: "ElevatedButton", key: "watch-" + s.id, ...twin("watch", "labelText"), icon: "play", onPressed: { go: { play: titleOf(s) } } },
     { type: "TextButton", key: "info-" + s.id, ...twin("info", "labelText"), onPressed: { go: { title: titleOf(s) } } },
@@ -67,13 +70,13 @@ const slideNode = (s) => ({
 
 // The key carries the number of slides: Kino's pager (0.9.81) keeps the count of its first drawing, and a slider that goes from one
 // number of slides to another closed the app with "Index 4 out of bounds for length 4". A new key is a new pager.
-const hero = (slides) => (slides.length === 1 ? slideNode(slides[0]) : {
-  type: "PageView", key: "hero" + slides.length, autoPlayMs: 6_000, children: slides.map(slideNode),
+const hero = (slides, headers) => (slides.length === 1 ? slideNode(slides[0], headers) : {
+  type: "PageView", key: "hero" + slides.length, autoPlayMs: 6_000, children: slides.map((s) => slideNode(s, headers)),
 });
 
 /** A row of cards: Kino's own rail (a tap opens Kino's title page; `ref` gives its "Ver más"). */
-const rail = (r, key, words) => ({
-  type: "titleRail", key, ...(words || { title: r.title, titleEn: r.titleEn || r.title }), ...(r.ref ? { ref: r.ref } : {}), items: r.items,
+const rail = (r, key, words, headers) => ({
+  type: "titleRail", key, ...(words || { title: r.title, titleEn: r.titleEn || r.title }), ...(r.ref ? { ref: r.ref } : {}), items: r.items, ...withHeaders(headers),
 });
 
 /**
@@ -87,9 +90,10 @@ export function browseView(cfg, { tab, data, recent, pending, failed, device = "
   const withTabs = tabs.length > 1;
   const body = [];
   if (data) {
-    if (data.slides.length > 0) body.push(hero(data.slides));
-    if (recent.length > 0) body.push(rail({ items: recent }, "recent", twin("recent", "title")));
-    for (const r of data.rails) body.push(rail(r, "rail-" + String(r.id).replace(/[^A-Za-z0-9_-]/g, "_")));
+    const h = cfg.imageHeaders;
+    if (data.slides.length > 0) body.push(hero(data.slides, h));
+    if (recent.length > 0) body.push(rail({ items: recent }, "recent", twin("recent", "title"), h));
+    for (const r of data.rails) body.push(rail(r, "rail-" + String(r.id).replace(/[^A-Za-z0-9_-]/g, "_"), null, h));
     if (data.rails.length === 0) body.push({ type: "Text", key: "empty", ...twin("empty"), color: "muted" });
   } else if (failed) {
     body.push({ type: "MaterialBanner", key: "loadFailed", role: "error", ...twin("failed"), action: { ...twin("retry", "label"), onTap: "retry" } });

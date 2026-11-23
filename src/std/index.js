@@ -1,4 +1,4 @@
-// std 1.1.0 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
+// std 1.3.0 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
 // Copy this folder as it is into a plugin's src/std/; a change goes to the golden copy first, then to every plugin.
 //
 // It paints at once from what is kept, then fills each tab as the source answers:
@@ -29,13 +29,20 @@ const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
  * `needsResolver`: the plugin cannot play without kino-resolver installed (the screen is then its install gate while it is
  * missing). `hasSettings`: the manifest declares `settings`. `tabs`: `[{ id, label, labelEn }]`. `loadTab(tabId)` → `{ rows }`.
  * `homeKey`: the kino.storage key where the plugin's home() keeps `{ rows }`, to seed the first tab (optional).
+ * `titleOf(card)` / `typeOf(card)`: the title and type TMDB is asked for (optional). `tmdbPictures`: TMDB's poster on the cards
+ * and its backdrop on the slides, for a site whose own pictures do not load. `imageHeaders`: `{ Referer, "User-Agent" }` sent
+ * with the hero's and the rails' pictures (Kino 0.9.83+), for a site whose images need them.
  */
-export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null }) {
-  const cfg = { name, nameEn, logo, logoAspect, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
+export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null }) {
+  const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t) => t.id);
-  const meta = makeMetaCache({ kino });
+  const meta = makeMetaCache({ kino, titleOf, typeOf, tmdbPictures });
   const enrich = (data) => (data ? {
-    slides: data.slides.map((s) => { const k = meta.known(s.id); return k.logo ? { ...s, logo: k.logo } : s; }),
+    slides: data.slides.map((s) => {
+      const k = meta.known(s.id);
+      const image = tmdbPictures && k.backdrop ? k.backdrop : null;
+      return k.logo || image ? { ...s, ...(k.logo ? { logo: k.logo } : {}), ...(image ? { image } : {}) } : s;
+    }),
     rails: data.rails.map((r) => ({ ...r, items: meta.dress(r.items) })),
   } : data);
   const memo = new Map(); // tab -> { data, whole: loaded in this sandbox }

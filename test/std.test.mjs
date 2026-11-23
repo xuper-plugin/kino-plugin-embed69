@@ -197,3 +197,52 @@ test("every user text has its English twin", async () => {
     if (n.type === "Text" && n.key !== "name") assert.equal(typeof n.textEn, "string", `Text "${n.text}" has textEn`);
   }
 });
+
+/** A kino whose `meta` (by title) answers TMDB data for every title and records what it was asked. */
+function metaKino(asked) {
+  const k = fakeKino();
+  k.meta = async (q) => { asked.push(q); return { ids: { tmdb: 100 + asked.length }, logo: "https://tmdb/l.png", poster: "https://tmdb/p.jpg", backdrop: "https://tmdb/b.jpg" }; };
+  k.meta.byTitle = true;
+  return k;
+}
+
+test("TMDB lookups run inside the short tick and give the cards their TMDB id", async () => {
+  const asked = [];
+  const s = make({ kino: metaKino(asked) });
+  const tree = await s.screen({ state: await loaded(s), device: "phone", installed });
+  assert.ok(asked.length > 0, "kino.meta was asked");
+  const rail = nodes(tree).find((n) => n.type === "titleRail");
+  assert.ok(rail.items.every((c) => c.ids && Number.isInteger(c.ids.tmdb)), "every card has its TMDB id");
+  assert.equal(rail.items[0].poster, "https://img/p1.jpg", "the site's poster is kept without tmdbPictures");
+  const slide = nodes(tree).find((n) => n.type === "heroCard");
+  assert.equal(slide.logo, "https://tmdb/l.png");
+  assert.equal(slide.image, "https://img/b1.jpg");
+});
+
+test("titleOf / typeOf shape what TMDB is asked", async () => {
+  const asked = [];
+  const s = make({ kino: metaKino(asked), titleOf: (c) => c.title.replace(/^Title /, "T"), typeOf: () => "series" });
+  await loaded(s);
+  assert.equal(asked[0].title, "T1");
+  assert.equal(asked[0].type, "series");
+});
+
+test("tmdbPictures: TMDB's poster on the cards and its backdrop on the slides", async () => {
+  const asked = [];
+  const s = make({ kino: metaKino(asked), tmdbPictures: true });
+  const tree = await s.screen({ state: await loaded(s), device: "phone", installed });
+  assert.equal(nodes(tree).find((n) => n.type === "titleRail").items[0].poster, "https://tmdb/p.jpg");
+  assert.equal(nodes(tree).find((n) => n.type === "heroCard").image, "https://tmdb/b.jpg");
+});
+
+test("imageHeaders go on every hero card and rail (a site whose pictures need its Referer); none without the option", async () => {
+  const H = { Referer: "https://site.example/", "User-Agent": "Mozilla/5.0 test" };
+  const s = make({ imageHeaders: H });
+  const all = nodes(await s.screen({ state: await loaded(s), device: "phone", installed }));
+  const pictured = all.filter((n) => n.type === "heroCard" || n.type === "titleRail");
+  assert.ok(pictured.length >= 2);
+  for (const n of pictured) assert.deepEqual(n.headers, H, n.type);
+  const plain = make();
+  const none = nodes(await plain.screen({ state: await loaded(plain), device: "phone", installed }));
+  assert.ok(none.filter((n) => n.type === "heroCard" || n.type === "titleRail").every((n) => n.headers === undefined));
+});
