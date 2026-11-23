@@ -1,123 +1,154 @@
 {
- "id": "embed69",
- "name": "Embed 69",
- "version": "1.6.6",
- "apiVersion": 30,
- "entry": "plugin.js",
- "icon": "icon.png",
- "description": "Películas y series en latino, castellano o subtituladas, a través de Embed 69.",
- "author": "xuper-plugin",
- "homepage": "https://github.com/xuper-plugin/kino-plugin-embed69",
- "hosts": [
-  "embed69.org",
-  "vidhide.com",
-  "vidhidepro.com",
-  "vidhideplus.com",
-  "dintezuvio.com",
-  "minochinos.com",
-  "filelions.to",
-  "morencius.com",
-  "hlswish.com",
-  "streamwish.com",
-  "streamwish.to",
-  "strwish.com",
-  "wishembed.com",
-  "filelions.com",
-  "hglink.to",
-  "vibuxer.com",
-  "voe.sx"
- ],
- "streamHosts": "any",
- "browser": true,
- "capabilities": [
-  "search",
-  "home",
-  "browse",
-  "episodes",
-  "resolve",
-  "download",
-  "screen"
- ],
- "categories": [
-  "movies",
-  "series"
- ],
- "color": "#6A1B9A",
- "theme": {
-  "accent": "#BA68C8",
-  "onAccent": "#12081A",
-  "background": "#0C0812",
-  "surface": "#1A1224",
-  "highlight": "#CE93D8"
- },
- "telemetry": true,
- "settings": [
-  {
-   "key": "language",
-   "label": "Idioma preferido",
-   "labelEn": "Preferred language",
-   "type": "select",
-   "default": "lat",
-   "options": [
-    {
-     "value": "lat",
-     "label": "Latino",
-     "labelEn": "Latin American"
-    },
-    {
-     "value": "esp",
-     "label": "Castellano",
-     "labelEn": "Castilian"
-    },
-    {
-     "value": "sub",
-     "label": "Subtitulado",
-     "labelEn": "Subtitled"
-    }
-   ]
-  },
-  {
-   "key": "cacheSection",
-   "label": "Caché",
-   "labelEn": "Cache",
-   "type": "section",
-   "hint": "Los IDs de IMDB se guardan para no pedirlos de nuevo.",
-   "hintEn": "IMDB ids are kept so they are not asked again."
-  },
-  {
-   "key": "clearCache",
-   "label": "Vaciar caché",
-   "labelEn": "Clear cache",
-   "type": "action",
-   "confirm": "¿Vaciar la caché de IDs?",
-   "confirmEn": "Clear the ID cache?"
-  }
- ],
- "consumes": {
-  "resolver": {
-   "repo": "xuper-plugin/kino-plugin-kino-resolver",
-   "door": "resolver",
-   "calls": [
-    "resolve"
-   ]
-  }
- },
- "recommends": [
-  "xuper-plugin/kino-plugin-kino-resolver"
- ],
- "screen": {
-  "label": "Embed69",
-  "labelEn": "Embed69",
-  "icon": "movie",
-  "menuOpens": "screen",
-  "opensFrom": [
-   "menu",
-   "settings"
+  "id": "embed69",
+  "name": "Embed 69",
+  "version": "1.6.7",
+  "apiVersion": 30,
+  "entry": "plugin.js",
+  "icon": "icon.png",
+  "description": "Películas y series en latino, castellano o subtituladas, a través de Embed 69.",
+  "author": "xuper-plugin",
+  "homepage": "https://github.com/xuper-plugin/kino-plugin-embed69",
+  "hosts": [
+    "embed69.org",
+    "vidhide.com",
+    "vidhidepro.com",
+    "vidhideplus.com",
+    "dintezuvio.com",
+    "minochinos.com",
+    "filelions.to",
+    "morencius.com",
+    "hlswish.com",
+    "streamwish.com",
+    "streamwish.to",
+    "strwish.com",
+    "wishembed.com",
+    "filelions.com",
+    "hglink.to",
+    "vibuxer.com",
+    "voe.sx"
   ],
-  "settingsButton": {
-   "label": "Abrir Embed69",
-   "labelEn": "Open Embed69"
+  "streamHosts": "any",
+  "browser": true,
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "episodes",
+    "resolve",
+    "download",
+    "screen"
+  ],
+  "categories": [
+    "movies",
+    "series"
+  ],
+  "color": "#6A1B9A",
+  "theme": {
+    "accent": "#BA68C8",
+    "onAccent": "#12081A",
+    "background": "#0C0812",
+    "surface": "#1A1224",
+    "highlight": "#CE93D8"
   },
-  "settingsIn": "both"
- }
+  "telemetry": true,
+  "settings": [
+    {
+      "key": "language",
+      "label": "Idioma preferido",
+      "labelEn": "Preferred language",
+      "type": "select",
+      "default": "lat",
+      "options": [
+        {
+          "value": "lat",
+          "label": "Latino",
+          "labelEn": "Latin American"
+        },
+        {
+          "value": "esp",
+          "label": "Castellano",
+          "labelEn": "Castilian"
+        },
+        {
+          "value": "sub",
+          "label": "Subtitulado",
+          "labelEn": "Subtitled"
+        }
+      ]
+    },
+    {
+      "key": "cacheSection",
+      "label": "Caché",
+      "labelEn": "Cache",
+      "type": "section",
+      "hint": "Los IDs de IMDB se guardan para no pedirlos de nuevo.",
+      "hintEn": "IMDB ids are kept so they are not asked again."
+    },
+    {
+      "key": "clearCache",
+      "label": "Vaciar caché",
+      "labelEn": "Clear cache",
+      "type": "action",
+      "confirm": "¿Vaciar la caché de IDs?",
+      "confirmEn": "Clear the ID cache?"
+    }
+  ],
+  "consumes": {
+    "resolver": {
+      "repo": "xuper-plugin/kino-plugin-kino-resolver",
+      "door": "resolver",
+      "calls": [
+        "resolve"
+      ]
+    }
+  },
+  "recommends": [
+    "xuper-plugin/kino-plugin-kino-resolver"
+  ],
+  "screen": {
+    "label": "Embed69",
+    "labelEn": "Embed69",
+    "icon": "movie",
+    "menuOpens": "screen",
+    "opensFrom": [
+      "menu",
+      "settings"
+    ],
+    "settingsButton": {
+      "label": "Abrir Embed69",
+      "labelEn": "Open Embed69"
+    },
+    "settingsIn": "both"
+  },
+  "provides": {
+    "catalog": {
+      "summary": "Titles this plugin finds, for the author's other plugins",
+      "calls": {
+        "search": {
+          "in": {
+            "q": "string",
+            "type": "string?"
+          },
+          "out": "Item[]"
+        }
+      },
+      "types": {
+        "Item": {
+          "id": "string",
+          "ref": "string",
+          "title": "string",
+          "kind": "string",
+          "poster": "string?",
+          "backdrop": "string?",
+          "year": "string?",
+          "overview": "string?",
+          "tmdb": "number?"
+        }
+      }
+    }
+  },
+  "signature": {
+    "authorKey": "6693946bd5c56196960959c4b9665fad5094374bcb85ddb282f8bf762c835263",
+    "value": "85ecc2857efb613c990c2a31cbb16b717f1bb075833a1378a5478abcef9fee2b9b2f402201b2f01017cda75dbda26672ad2b90661777addf0e4a4277379a9800"
+  }
 }
