@@ -26,9 +26,12 @@ const Q_MAX = 200;
 const META_TICK_MS = 3_000;
 // At most this many titles asked of TMDB per tick (a poster-only tab with many rails would otherwise ask a hundred).
 const META_TICK_CARDS = 24;
-// A tab load that has not answered by then counts as failed (with Retry): Kino stops a call at 20 s, and three of the timer's
-// calls failing in a row switch the timer off for the rest of the opening, leaving the skeletons with no way out.
-const TAB_LOAD_MS = 15_000;
+// Kino stops a call at 20 s, and three of the timer's calls failing in a row switch the timer off for the rest of the opening,
+// leaving the skeletons with no way out. Kino has no timers to cut a load short, so each load leaves a mark in kino.storage
+// and clears it when done: a mark older than a call can live means Kino stopped that load, and the next tick answers at once
+// with that tab failed (its Retry banner) instead of starting it again.
+const INFLIGHT_KEY = "std:inflight";
+const INFLIGHT_STALE_MS = 18_000;
 // A tab with no slides of its own asks TMDB again on the next tick, until MAX_SLIDES are known, every title was asked or this
 // many ticks passed.
 const MAX_META_TICKS = 10;
@@ -43,7 +46,7 @@ const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
  * and its backdrop on the slides, for a site whose own pictures do not load. `imageHeaders`: `{ Referer, "User-Agent" }` sent
  * with the hero's and the rails' pictures (Kino 0.9.83+), for a site whose images need them.
  */
-export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null, tabTimeoutMs = TAB_LOAD_MS }) {
+export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null }) {
   const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t) => t.id);
   const meta = makeMetaCache({ kino, titleOf, typeOf, tmdbPictures });
@@ -147,11 +150,21 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
     return browseView(cfg, { tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), searching, device });
   }
 
+  /** The tab whose load Kino cut short last time (its mark outlived any call), cleared once read; else null. */
+  function cutShort() {
+    try {
+      const o = JSON.parse(get(INFLIGHT_KEY) || "null");
+      if (!o || typeof o.tab !== "string") return null;
+      if (Date.now() - Number(o.at) < INFLIGHT_STALE_MS) return null;
+      kino.storage.remove(INFLIGHT_KEY);
+      return o.tab;
+    } catch (_) { return null; }
+  }
+
   async function load(tab) {
-    let timer = null;
-    const late = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("tab load over " + tabTimeoutMs + " ms"), { code: "timeout" })), tabTimeoutMs); });
+    set(INFLIGHT_KEY, JSON.stringify({ tab, at: Date.now() }));
     let page;
-    try { page = await Promise.race([loadTab(tab), late]); } finally { clearTimeout(timer); }
+    try { page = await loadTab(tab); } finally { try { kino.storage.remove(INFLIGHT_KEY); } catch (_) { /* no storage */ } }
     const data = tabOf(page);
     if (data) { memo.set(tab, { data, whole: true }); writeSnap(tab, data); }
     return data !== null;
@@ -197,6 +210,11 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
         metaTicks.set(tab, ticks);
         const again = noOwnSlides && count > 0 && ticks < MAX_META_TICKS && slidesFromMeta(m.data.rails).length < MAX_SLIDES && cards.some((c) => !meta.asked(c.id));
         return { state: { pending: again ? [next, ...rest] : rest } };
+      }
+      if (cutShort() === next) {
+        log("tab", next, "cut short by Kino last time");
+        failed[next] = true;
+        return { state: { pending: rest, failed } };
       }
       try {
         const ok = await load(next);

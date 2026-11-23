@@ -514,10 +514,11 @@ var RECENT_MAX = 12;
 var Q_MAX = 200;
 var META_TICK_MS = 3e3;
 var META_TICK_CARDS = 24;
-var TAB_LOAD_MS = 15e3;
+var INFLIGHT_KEY = "std:inflight";
+var INFLIGHT_STALE_MS = 18e3;
 var MAX_META_TICKS = 10;
 var DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
-function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf: titleOf3, typeOf, tmdbPictures = false, imageHeaders = null, tabTimeoutMs = TAB_LOAD_MS }) {
+function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf: titleOf3, typeOf, tmdbPictures = false, imageHeaders = null }) {
   const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t2) => t2.id);
   const meta = makeMetaCache({ kino: kino2, titleOf: titleOf3, typeOf, tmdbPictures });
@@ -647,16 +648,27 @@ function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect
     const searching = !!(c.route && c.route.name === "search");
     return browseView(cfg, { tab, data, recent: meta.dress(recentOf(readKeys(), loaded)), pending, failed: !!(st.failed && st.failed[tab]), searching, device });
   }
+  function cutShort() {
+    try {
+      const o = JSON.parse(get(INFLIGHT_KEY) || "null");
+      if (!o || typeof o.tab !== "string") return null;
+      if (Date.now() - Number(o.at) < INFLIGHT_STALE_MS) return null;
+      kino2.storage.remove(INFLIGHT_KEY);
+      return o.tab;
+    } catch (_) {
+      return null;
+    }
+  }
   async function load(tab) {
-    let timer = null;
-    const late = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(Object.assign(new Error("tab load over " + tabTimeoutMs + " ms"), { code: "timeout" })), tabTimeoutMs);
-    });
+    set(INFLIGHT_KEY, JSON.stringify({ tab, at: Date.now() }));
     let page;
     try {
-      page = await Promise.race([loadTab(tab), late]);
+      page = await loadTab(tab);
     } finally {
-      clearTimeout(timer);
+      try {
+        kino2.storage.remove(INFLIGHT_KEY);
+      } catch (_) {
+      }
     }
     const data = tabOf(page);
     if (data) {
@@ -702,6 +714,11 @@ function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect
         metaTicks.set(tab, ticks);
         const again = noOwnSlides && count > 0 && ticks < MAX_META_TICKS && slidesFromMeta(m.data.rails).length < MAX_SLIDES && cards.some((c) => !meta.asked(c.id));
         return { state: { pending: again ? [next, ...rest] : rest } };
+      }
+      if (cutShort() === next) {
+        log("tab", next, "cut short by Kino last time");
+        failed[next] = true;
+        return { state: { pending: rest, failed } };
       }
       try {
         const ok = await load(next);

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.4
+
+- Tabs load again: the previous version used a timer Kino does not have, so every tab failed; a tab Kino cut short now offers Retry (std 1.6.0)
+
 ## 1.6.3
 
 - Back closes the search box instead of the screen; a tab that takes too long offers Retry instead of skeletons; fewer TMDB lookups per tick (std 1.6.0)

@@ -353,13 +353,29 @@ test("the search route: Back (Kino pops it) leaves the bar as it was; the tree d
   assert.deepEqual(done.state, { ui: null });
 });
 
-test("a tab load that hangs ends as failed (with Retry) before Kino's 20 s call limit, so the timer is not switched off", { timeout: 5000 }, async () => {
-  const s = make({ loadTab: () => new Promise(() => {}), tabTimeoutMs: 30 });
+test("a tab load Kino cut short (its call never answered) is failed with Retry on the next tick, so the timer goes on", async () => {
+  const k = fakeKino();
+  const s = make({ kino: k });
+  // What a load that Kino stopped at 20 s leaves behind: its mark, older than a call can live.
+  k.storage.set("std:inflight", JSON.stringify({ tab: "inicio", at: Date.now() - 30_000 }));
   const r = await s.screenEvent({ name: "tick", state: { tab: "inicio", pending: ["inicio"] }, device: "phone" });
   assert.deepEqual(r.state.failed, { inicio: true });
   assert.deepEqual(r.state.pending, []);
+  assert.equal(k.storage.get("std:inflight"), null, "the mark is cleared");
   const tree = await s.screen({ state: { tab: "inicio", failed: { inicio: true } }, device: "phone", installed });
   assert.ok(nodes(tree).some((n) => n.type === "MaterialBanner" && n.action && n.action.onTap === "retry"));
+  // A load that finishes leaves no mark.
+  const ok = await s.screenEvent({ name: "tick", state: { tab: "inicio", pending: ["inicio"] }, device: "phone" });
+  assert.deepEqual(ok.state.failed, {});
+  assert.equal(k.storage.get("std:inflight"), null);
+});
+
+test("std uses no timers: Kino has no setTimeout / setInterval / clearTimeout", () => {
+  const dir = new URL("../src/std/", import.meta.url);
+  for (const f of fs.readdirSync(dir)) {
+    const src = fs.readFileSync(new URL(f, dir), "utf8").replace(/\/\/.*$/gm, "");
+    assert.ok(!/\b(setTimeout|setInterval|clearTimeout|clearInterval)\s*\(/.test(src), f);
+  }
 });
 
 test("a poster-only tab with many rails asks TMDB at most 24 titles per tick", async () => {
