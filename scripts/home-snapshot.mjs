@@ -59,9 +59,13 @@ const withIds = (c) => { const h = found.get(c.id); return h && !(c.ids && c.ids
 
 const cleanRows = (page) => (page && Array.isArray(page.rows) ? page.rows : []).filter((r) => r && Array.isArray(r.items) && r.items.length > 0);
 const live = {};
-for (const t of source.tabs) {
+async function loadLive(t) {
   try { live[t.id] = cleanRows(await source.loadTab(t.id)); } catch (e) { live[t.id] = null; console.log(`${t.id}: failed (${(e && e.code) || "error"}: ${String((e && e.message) || e).slice(0, 160)})`); }
 }
+for (const t of source.tabs) await loadLive(t);
+// A tab that came back empty is asked once more at the end: the first tab of a fresh runner meets cold DNS and TLS, and a
+// plugin that gives its rows a short budget (made for a phone) can run out before the site answers.
+for (const t of source.tabs) if (!live[t.id] || live[t.id].length === 0) { console.log(`${t.id}: asked again`); await loadLive(t); }
 
 /** The Home: its own rows, then the other tabs' rows it lacks (by title), until it has MIN_ROWS. */
 function richHome(rows) {
