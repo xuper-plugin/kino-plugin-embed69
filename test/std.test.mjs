@@ -532,3 +532,61 @@ test("std 1.7.1: the search ops stay within Kino's 8 on a TV, the leading arrow 
   assert.ok(open.length <= 8 && close.length <= 8, `open ${open.length}, close ${close.length}`);
   assert.ok(open.includes("hide:close") && close.includes("show:close"));
 });
+
+// ---- Home snapshot (std 1.8.0) ----
+import { snapshotRows, snapshotUrl, snapshotSource, SNAPSHOT_MAX_AGE_MS } from "../src/std/index.js";
+
+const snapRow = { id: "s1", title: "Desde GitHub", items: [item(9)] };
+const snapFile = (over = {}) => JSON.stringify({ v: 1, tab: "inicio", at: Date.now(), rows: [snapRow], ...over });
+
+/** A kino whose fetch answers the snapshot url with [answer] (a string body, a status number, or a thrown error). */
+function snapKino(answer, seen = []) {
+  const k = fakeKino();
+  k.fetch = async (url) => {
+    seen.push(url);
+    if (answer instanceof Error) throw answer;
+    if (typeof answer === "number") return { ok: false, status: answer, text: async () => "" };
+    return { ok: true, status: 200, text: async () => answer };
+  };
+  return k;
+}
+
+test("snapshot: the file's rows, only for its own tab, fresh and non-empty", () => {
+  const now = Date.now();
+  assert.deepEqual(snapshotRows(snapFile(), "inicio", now), [snapRow]);
+  assert.equal(snapshotRows(snapFile(), "series", now), null, "another tab's file");
+  assert.equal(snapshotRows(snapFile({ at: now - SNAPSHOT_MAX_AGE_MS - 1 }), "inicio", now), null, "older than 24 h");
+  assert.equal(snapshotRows(snapFile({ rows: [] }), "inicio", now), null, "empty");
+  assert.equal(snapshotRows(snapFile({ v: 2 }), "inicio", now), null, "unknown version");
+  assert.equal(snapshotRows("<html>", "inicio", now), null, "not JSON");
+  assert.equal(snapshotUrl("xuper-plugin/kino-plugin-serieskao", "inicio"), "https://raw.githubusercontent.com/xuper-plugin/kino-plugin-serieskao/main/home/inicio.json");
+});
+
+test("snapshot: the screen opens from the repository's file and never scrapes the site", async () => {
+  let live = 0;
+  const seen = [];
+  const s = make({ kino: snapKino(snapFile(), seen), snapshot: "xuper-plugin/kino-plugin-serieskao", loadTab: async () => { live++; return { rows: [] }; } });
+  await loaded(s);
+  const tree = JSON.stringify(await s.screen({ state: await loaded(s), device: "phone", installed }));
+  assert.equal(live, 0);
+  assert.ok(seen[0].endsWith("/home/inicio.json"));
+  assert.ok(tree.includes("Desde GitHub"));
+});
+
+test("snapshot: a missing, failed or stale file falls back to the live site", async () => {
+  for (const answer of [404, new Error("offline"), snapFile({ at: Date.now() - SNAPSHOT_MAX_AGE_MS - 1 })]) {
+    let live = 0;
+    const s = make({ kino: snapKino(answer), snapshot: "xuper-plugin/kino-plugin-serieskao", loadTab: async () => { live++; return { rows: [{ id: "r1", title: "Estrenos", items: [item(1)] }] }; } });
+    await loaded(s);
+    assert.ok(live >= 1, `live after ${answer instanceof Error ? answer.message : typeof answer === "number" ? answer : "stale"}`);
+  }
+});
+
+test("snapshot: without the option nothing is fetched, and the script finds the live tabs", async () => {
+  const seen = [];
+  const s = make({ kino: snapKino(snapFile(), seen) });
+  await loaded(s);
+  assert.equal(seen.length, 0);
+  const src = snapshotSource();
+  assert.ok(Array.isArray(src.tabs) && typeof src.loadTab === "function");
+});

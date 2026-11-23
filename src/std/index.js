@@ -1,4 +1,4 @@
-// std 1.7.1 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
+// std 1.8.1 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
 // Copy this folder as it is into a plugin's src/std/; a change goes to the golden copy first, then to every plugin.
 //
 // It paints at once from what is kept, then fills each tab as the source answers:
@@ -52,9 +52,46 @@ const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
  * and its backdrop on the slides, for a site whose own pictures do not load. `imageHeaders`: `{ Referer, "User-Agent" }` sent
  * with the hero's and the rails' pictures (Kino 0.9.83+), for a site whose images need them.
  */
-export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null, searchHere = null, page = null, barSearch = true, backArrow = true }) {
+// ---- Home snapshot (std 1.8.0, owner 2026-11-23) ----
+// Each plugin repository keeps a ready copy of its screen's tabs in home/<tab>.json, written every 6 hours by a GitHub Action
+// (scripts/home-snapshot.mjs) that runs the plugin's own loadTab. The screen reads that file first (one small request instead of
+// scraping the site on the device) and scrapes the site only when the file is missing, broken or older than SNAPSHOT_MAX_AGE_MS.
+
+export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const SNAPSHOT_TIMEOUT_MS = 8000;
+
+/** Where a tab's snapshot lives: the repository's main branch on raw.githubusercontent.com. */
+export const snapshotUrl = (repo, tab) => "https://raw.githubusercontent.com/" + repo + "/main/home/" + encodeURIComponent(tab) + ".json";
+
+/** The rows of a snapshot file for [tab], or null when it is not one, is for another tab, is empty or is too old. Pure. */
+export function snapshotRows(text, tab, now = Date.now()) {
+  let o;
+  try { o = JSON.parse(String(text)); } catch (_) { return null; }
+  if (!o || o.v !== SNAPSHOT_VERSION || o.tab !== tab || !Array.isArray(o.rows) || o.rows.length === 0) return null;
+  const at = Number(o.at);
+  if (!Number.isFinite(at) || now - at > SNAPSHOT_MAX_AGE_MS || at - now > 60 * 60 * 1000) return null;
+  return o.rows;
+}
+
+/** The tabs and the live loadTab of the last standard screen made (the snapshot script runs them). */
+let lastSource = null;
+export const snapshotSource = () => lastSource;
+
+export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null, searchHere = null, page = null, barSearch = true, backArrow = true, snapshot = null }) {
   const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, barSearch: barSearch !== false, backArrow: backArrow !== false, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t) => t.id);
+  lastSource = { tabs: cfg.tabs, loadTab, titleOf, typeOf };
+  /** [tab]'s rows from the repository's snapshot (`snapshot`: "owner/repo"), or null to scrape the site as before. */
+  async function fromSnapshot(tab) {
+    if (typeof snapshot !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(snapshot)) return null;
+    try {
+      const r = await kino.fetch(snapshotUrl(snapshot, tab), { timeoutMs: SNAPSHOT_TIMEOUT_MS });
+      if (!r || !r.ok) return null;
+      const rows = snapshotRows(await r.text(), tab);
+      return rows ? { rows } : null;
+    } catch (_) { return null; }
+  }
   const meta = makeMetaCache({ kino, titleOf, typeOf, tmdbPictures });
   /** A source with no backdrops: slides from the first titles TMDB knows a backdrop for (with its synopsis and logo). */
   function slidesFromMeta(rails) {
@@ -191,7 +228,7 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
   async function load(tab) {
     set(INFLIGHT_KEY, JSON.stringify({ tab, at: Date.now() }));
     let page;
-    try { page = await loadTab(tab); } finally { try { kino.storage.remove(INFLIGHT_KEY); } catch (_) { /* no storage */ } }
+    try { page = (await fromSnapshot(tab)) || (await loadTab(tab)); } finally { try { kino.storage.remove(INFLIGHT_KEY); } catch (_) { /* no storage */ } }
     const data = tabOf(page);
     if (data) { memo.set(tab, { data, whole: true }); writeSnap(tab, data); }
     return data !== null;

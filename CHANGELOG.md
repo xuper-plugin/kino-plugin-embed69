@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.9
+
+- A rich Home that opens at once: a ready slider (TMDB backdrops and synopses) and at least 4 rows, from a snapshot in this repository refreshed every 6 hours (the site only as a fallback) (std 1.8.1)
+
 ## 1.6.8
 
 - Back arrow instead of the X: leaving goes back to where you came from (std 1.7.1)
