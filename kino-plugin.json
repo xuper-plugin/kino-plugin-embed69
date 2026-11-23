@@ -1,7 +1,7 @@
 {
   "id": "embed69",
   "name": "Embed 69",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "apiVersion": 30,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -149,6 +149,6 @@
   },
   "signature": {
     "authorKey": "6693946bd5c56196960959c4b9665fad5094374bcb85ddb282f8bf762c835263",
-    "value": "85ecc2857efb613c990c2a31cbb16b717f1bb075833a1378a5478abcef9fee2b9b2f402201b2f01017cda75dbda26672ad2b90661777addf0e4a4277379a9800"
+    "value": "57556859af8fa74b9a030d5b69014e6a17bd514011051fc41aa358bb85b87da812bd8abfd0444a692e86d046030a06fb4b08cdbe42b5d99a6acbf1d8146fac00"
   }
 }

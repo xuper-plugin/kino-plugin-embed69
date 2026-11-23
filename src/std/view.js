@@ -24,17 +24,28 @@ const tabBar = (tabs, active) => ({
 
 const iconButton = (key, icon, word, onPressed) => ({ type: "IconButton", key, icon, ...twin(word, "labelText"), ...twin(word, "tooltip"), onPressed });
 
-/** The bar as the search box: the brand, its buttons (and the TV's tabs) hidden, the box shown and focused. At most 8 ops. */
+/**
+ * The bar as the search box: the brand, its buttons, the leading back arrow (std 1.7.1: the box has its own) and the TV's tabs
+ * hidden, the box shown and focused. At most 8 ops (Kino's cap): 8 on a TV.
+ */
 export const searchOpenOps = (tabsInBar) => [
-  { hide: "brand" }, { hide: "searchButton" }, { hide: "settingsButton" }, ...(tabsInBar ? [{ hide: "tabs" }] : []),
+  { hide: "close" }, { hide: "brand" }, { hide: "searchButton" }, { hide: "settingsButton" }, ...(tabsInBar ? [{ hide: "tabs" }] : []),
   { show: "closeSearch" }, { show: "q" }, { focus: "q" },
 ];
 
-/** The bar back as it was: the box hidden and emptied. At most 8 ops. */
+/** The bar back as it was: the box hidden and emptied, the leading arrow back. At most 8 ops: 8 on a TV. */
 export const searchClosedOps = (tabsInBar) => [
   { hide: "closeSearch" }, { hide: "q" }, { clear: "q" },
-  { show: "brand" }, { show: "searchButton" }, { show: "settingsButton" }, ...(tabsInBar ? [{ show: "tabs" }] : []),
+  { show: "close" }, { show: "brand" }, { show: "searchButton" }, { show: "settingsButton" }, ...(tabsInBar ? [{ show: "tabs" }] : []),
 ];
+
+/**
+ * How the screen is left: the back arrow (std 1.7.1 default, owner 2026-11-23: every plugin, opened from Da-Video or from Kino, goes
+ * back to where it came from), or the X with `backArrow: false`. Key "close" either way (the search ops hide and show it).
+ */
+const leaveButton = (cfg) => cfg.backArrow
+  ? iconButton("close", "arrow_back", "back", { go: { close: true } })
+  : iconButton("close", "close", "close", { go: { close: true } });
 
 /** The donation affordance: a QR on a TV (a TV cannot open a link well), a heart button elsewhere. */
 export function supportNode(device) {
@@ -113,7 +124,7 @@ export function browseView(cfg, { tab, data, recent, pending, failed, searching 
   // ops at once) instead of the screen, and the next Back, with no `onBack` declared, leaves.
   const tabsInBar = tv && withTabs; // on a TV the tabs sit in the bar beside the brand (one D-pad strip); elsewhere under it
   const appBar = bar({
-    leading: iconButton("close", "close", "close", { go: { close: true } }),
+    leading: leaveButton(cfg),
     title: { type: "Row", key: "titleRow", gap: tabsInBar ? 24 : 8, crossAxisAlignment: "center", children: [
       { ...iconButton("closeSearch", "arrow_back", "back", { ui: searchClosedOps(tabsInBar), event: "searchClosed" }), hidden: true },
       brand(cfg),
@@ -123,7 +134,8 @@ export function browseView(cfg, { tab, data, recent, pending, failed, searching 
         onSubmitted: "search", trailingIcon: "search", ...twin("search", "trailingLabel"), onTrailingTap: "search" },
     ] },
     actions: [
-      iconButton("searchButton", "search", "search", { ui: searchOpenOps(tabsInBar), event: "searchOpened" }),
+      // barSearch: false (std 1.7.0): the plugin draws its own search field in its page instead of the bar's icon.
+      ...(cfg.barSearch ? [iconButton("searchButton", "search", "search", { ui: searchOpenOps(tabsInBar), event: "searchOpened" })] : []),
       iconButton("settingsButton", "settings", "settings", "openSettings"),
     ],
   });
@@ -156,7 +168,7 @@ export function resultsView(cfg, { q, order, names, pending, found, device = "ph
     shown++;
     body.push(rail({ items: r.items }, "found-" + i, twin("resultsIn", "title", { name }), cfg.imageHeaders));
   });
-  if (!pending.length && shown === 0) body.unshift({ type: "Text", key: "noResults", ...twin("noResults") });
+  if (!pending.length && shown === 0 && order.some((r) => { const x = found.get(r); return x && x.ok; })) body.unshift({ type: "Text", key: "noResults", ...twin("noResults") });
   return {
     type: "Scaffold",
     appBar: bar({ leading: iconButton("back", "arrow_back", "back", "back"), title: { type: "Text", key: "resultsTitle", style: "h4", ...twin("resultsTitle", "text", { q }) } }),
@@ -182,7 +194,7 @@ export function gateView(cfg, device = "phone") {
   const name = [cfg.name, cfg.nameEn || cfg.name];
   return {
     type: "Scaffold",
-    appBar: bar({ leading: iconButton("close", "close", "close", { go: { close: true } }), title: brand(cfg) }),
+    appBar: bar({ leading: leaveButton(cfg), title: brand(cfg) }),
     body: { type: "Column", key: "gate", mainAxisAlignment: "center", crossAxisAlignment: "center", padding: 24, gap: 16, children: [
       { type: "Text", key: "gateTitle", style: "h3", ...twin("gateTitle") },
       { type: "Text", key: "gateText", style: "p", ...twin("gateText", "text", { name }) },

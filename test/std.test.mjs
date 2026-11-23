@@ -75,11 +75,11 @@ test("search opens and closes in the bar at once (local ui), and tells the plugi
   const all = nodes(tree.appBar);
   const open = all.find((n) => n.key === "searchButton").onPressed;
   assert.equal(open.event, "searchOpened", "then the plugin notes it, so the tree declares onBack");
-  assert.deepEqual(ops(open).sort(), ["focus:q", "hide:brand", "hide:searchButton", "hide:settingsButton", "show:closeSearch", "show:q"].sort());
+  assert.deepEqual(ops(open).sort(), ["focus:q", "hide:close", "hide:brand", "hide:searchButton", "hide:settingsButton", "show:closeSearch", "show:q"].sort());
   const close = all.find((n) => n.key === "closeSearch");
   assert.equal(close.icon, "arrow_back");
   assert.equal(close.onPressed.event, "searchClosed");
-  assert.deepEqual(ops(close.onPressed).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:brand", "show:searchButton", "show:settingsButton"].sort());
+  assert.deepEqual(ops(close.onPressed).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:close", "show:brand", "show:searchButton", "show:settingsButton"].sort());
   const q = all.find((n) => n.key === "q");
   assert.equal(q.type, "TextField");
   assert.equal(q.kind, "search");
@@ -98,7 +98,7 @@ test("search goes to Kino's search and puts the bar back", async () => {
   const s = make();
   const done = await s.screenEvent({ name: "search", value: "  dune ", state: {} });
   assert.deepEqual(done.go, { search: { q: "dune" } });
-  assert.deepEqual(ops(done).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:brand", "show:searchButton", "show:settingsButton"].sort());
+  assert.deepEqual(ops(done).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:close", "show:brand", "show:searchButton", "show:settingsButton"].sort());
   const empty = await s.screenEvent({ name: "search", value: "   ", state: {} });
   assert.equal(empty, null, "nothing typed: nothing happens");
   assert.deepEqual((await s.screenEvent({ name: "search", value: null, state: { inputs: { q: "alien" } } })).go, { search: { q: "alien" } });
@@ -337,7 +337,7 @@ test("while searching, Back closes the search (Scaffold onBack), then the next B
   assert.deepEqual(await s.screenEvent({ name: "searchOpened", state: {} }), { state: { searching: true } });
   const open = await s.screen({ state: { searching: true }, device: "phone", installed });
   assert.equal(open.onBack.event, "searchClosed");
-  assert.deepEqual(ops(open.onBack).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:brand", "show:searchButton", "show:settingsButton"].sort());
+  assert.deepEqual(ops(open.onBack).sort(), ["clear:q", "hide:closeSearch", "hide:q", "show:close", "show:brand", "show:searchButton", "show:settingsButton"].sort());
   assert.equal((await s.screen({ state: {}, device: "phone", installed })).onBack, undefined, "not searching: Back leaves");
   // The answer drops the flag and the local ops: the next tree declares no onBack and draws the bar's defaults.
   assert.deepEqual(await s.screenEvent({ name: "searchClosed", state: { searching: true } }), { state: { searching: false, ui: null } });
@@ -514,4 +514,21 @@ test("catalogDoor: the plugin's own search with Kino's query shape, its answer c
   assert.equal(asked[0].type, "series");
   assert.deepEqual(await door({ q: "" }), []);
   assert.equal(asked.length, 1);
+});
+
+test("std 1.7.1: the screen leaves with a back arrow by default (the X only with backArrow: false), and the gate too", async () => {
+  const tree = await make().screen({ state: {}, device: "phone", installed });
+  assert.equal(tree.appBar.leading.icon, "arrow_back");
+  assert.deepEqual(tree.appBar.leading.onPressed, { go: { close: true } });
+  const x = await make({ backArrow: false }).screen({ state: {}, device: "phone", installed });
+  assert.equal(x.appBar.leading.icon, "close");
+});
+
+test("std 1.7.1: the search ops stay within Kino's 8 on a TV, the leading arrow hidden while the box is open", async () => {
+  const tree = await make().screen({ state: {}, device: "tv", installed });
+  const all = nodes(tree.appBar);
+  const open = ops(all.find((n) => n.key === "searchButton").onPressed);
+  const close = ops(all.find((n) => n.key === "closeSearch").onPressed);
+  assert.ok(open.length <= 8 && close.length <= 8, `open ${open.length}, close ${close.length}`);
+  assert.ok(open.includes("hide:close") && close.includes("show:close"));
 });

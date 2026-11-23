@@ -1,4 +1,4 @@
-// std 1.7.0 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
+// std 1.7.1 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
 // Copy this folder as it is into a plugin's src/std/; a change goes to the golden copy first, then to every plugin.
 //
 // It paints at once from what is kept, then fills each tab as the source answers:
@@ -52,8 +52,8 @@ const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
  * and its backdrop on the slides, for a site whose own pictures do not load. `imageHeaders`: `{ Referer, "User-Agent" }` sent
  * with the hero's and the rails' pictures (Kino 0.9.83+), for a site whose images need them.
  */
-export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null, searchHere = null, page = null }) {
-  const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
+export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect = "1:1", needsResolver, hasSettings, tabs, loadTab, homeKey = null, titleOf, typeOf, tmdbPictures = false, imageHeaders = null, searchHere = null, page = null, barSearch = true, backArrow = true }) {
+  const cfg = { name, nameEn, logo, logoAspect, imageHeaders, hasSettings: !!hasSettings, barSearch: barSearch !== false, backArrow: backArrow !== false, tabs: Array.isArray(tabs) && tabs.length > 0 ? tabs : DEFAULT_TABS };
   const TAB_IDS = cfg.tabs.map((t) => t.id);
   const meta = makeMetaCache({ kino, titleOf, typeOf, tmdbPictures });
   /** A source with no backdrops: slides from the first titles TMDB knows a backdrop for (with its synopsis and logo). */
@@ -234,7 +234,7 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
         const batch = rp.slice(0, SOURCES_PER_TICK);
         const order = Array.isArray(state.rorder) ? state.rorder : [];
         let answers = [];
-        try { answers = await searchHere.searchIn(String(state.rq || ""), batch); } catch (e) { log("results", (e && e.code) || "error"); }
+        try { answers = await searchHere.searchIn(String(state.rq || ""), batch); } catch (e) { log("results", ((e && e.code) || "error") + " " + String((e && e.message) || "").slice(0, 200)); }
         for (const repo of batch) {
           const a = (Array.isArray(answers) ? answers : []).find((x) => x && x.repo === repo);
           found.set(repo, asFound(a, order.indexOf(repo)));
