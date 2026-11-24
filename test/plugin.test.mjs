@@ -303,6 +303,18 @@ test("the categories are TMDB's genres, movies first, each browsable as genre:<k
   assert.equal(tmdbCalls.at(-1).params.with_genres, "28");
 });
 
+test("every genre tile has an https TMDB art URL; an unknown genre has none", async () => {
+  const movie = [28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27, 10402];
+  const tv = [10759, 16, 35, 80, 99, 18, 10751, 9648];
+  tmdbImpl = async (path) => ({ genres: (path === "/genre/movie/list" ? movie : tv).map((id) => ({ id, name: "G" + id })) });
+  const cats = await plugin.categories();
+  assert.equal(cats.length, 20);
+  for (const c of cats) assert.match(c.art, /^https:\/\/image\.tmdb\.org\/t\/p\/w780\/[A-Za-z0-9]+\.jpg$/, c.id);
+  tmdbImpl = async () => ({ genres: [{ id: 999999, name: "Nuevo" }] });
+  const odd = await plugin.categories();
+  assert.equal(odd[0].art, undefined);
+});
+
 test("the cache action empties only the IMDB ids", async () => {
   const removed = [];
   const before = globalThis.kino.storage;

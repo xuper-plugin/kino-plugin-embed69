@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.10
+
+- Categorías: every genre tile now shows a picture (a well-known TMDB backdrop per genre, no extra requests)
+
 ## 1.6.9
 
 - A rich Home that opens at once: a ready slider (TMDB backdrops and synopses) and at least 4 rows, from a snapshot in this repository refreshed every 6 hours (the site only as a fallback) (std 1.8.1)
