@@ -22,6 +22,8 @@ jobs:
       - run: node scripts/home-snapshot.mjs
         env:
           KINO_TMDB_KEY: ${{ secrets.KINO_TMDB_KEY }}
+          # This Home is a TMDB list, not the site's catalog: the titles the site does not have are left out.
+          SNAPSHOT_CHECK: "1"
       - name: Commit the snapshot
         run: |
           git add home

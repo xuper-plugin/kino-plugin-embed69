@@ -67,6 +67,107 @@ for (const t of source.tabs) await loadLive(t);
 // plugin that gives its rows a short budget (made for a phone) can run out before the site answers.
 for (const t of source.tabs) if (!live[t.id] || live[t.id].length === 0) { console.log(`${t.id}: asked again`); await loadLive(t); }
 
+// ---- only what plays (SNAPSHOT_CHECK=1, for a plugin whose Home is a TMDB list and not the site's own catalog) ----
+// A title of a TMDB list may not be on the site at all: the card opens and nothing plays (measured 2026-11-24: 3 of 4 popular
+// movies on SeriesMetro, 2 of 3 series on SeriesFlix). So each card is asked to the plugin itself, as a play would: its own
+// resolve() (a series: its first episode) with a resolver that only records. A server listed = the site has it; `not_found` and
+// none = it does not, and the card leaves the Home; anything else (a timeout, a limit) decides nothing. What was learned is kept
+// in home/available.json (a title the site has: 14 days; one it lacks: 3 days, it may arrive), and a run checks at most
+// SNAPSHOT_CHECKS cards it does not know yet, the first cards of each row first: a card not checked yet stays.
+const CHECK = process.env.SNAPSHOT_CHECK === "1" && typeof plugin.resolve === "function";
+const availFile = new URL("home/available.json", ROOT);
+const known = (() => { try { return JSON.parse(readFileSync(availFile, "utf8")).items || {}; } catch (_) { return {}; } })();
+const DAY = 24 * 60 * 60 * 1000;
+const freshOf = (ref) => { const k = known[ref]; return k && Date.now() - Number(k.at) < (k.ok ? 14 : 3) * DAY ? k : null; };
+
+/** kino.meta for the checks, answered by TMDB with the snapshot's key (the kit's own answers only fixtures). */
+const tmdbJson = new Map();
+async function tmdbGet(path, q = {}) {
+  const u = new URL("https://api.themoviedb.org/3" + path);
+  u.searchParams.set("api_key", KEY); u.searchParams.set("language", "es-MX");
+  for (const [k, v] of Object.entries(q)) u.searchParams.set(k, v);
+  if (tmdbJson.has(u.href)) return tmdbJson.get(u.href);
+  let j = null;
+  try { const r = await fetch(u, { signal: AbortSignal.timeout(10000) }); j = r.ok ? await r.json() : null; } catch (_) { j = null; }
+  tmdbJson.set(u.href, j);
+  return j;
+}
+async function metaByTmdb(type, id) {
+  const tv = type === "series";
+  const d = await tmdbGet(`/${tv ? "tv" : "movie"}/${id}`, { append_to_response: "external_ids" });
+  if (!d || !d.id) return null;
+  const imdb = d.imdb_id || (d.external_ids && d.external_ids.imdb_id);
+  const out = { type, title: d.title || d.name, originalTitle: d.original_title || d.original_name,
+    year: Number(String(d.release_date || d.first_air_date || "").slice(0, 4)) || undefined, ids: { tmdb: d.id, ...(imdb ? { imdb } : {}) } };
+  // The first season is enough to find a first episode.
+  if (tv) { const s = await tmdbGet(`/tv/${id}/season/1`); out.episodes = ((s && s.episodes) || []).map((e) => ({ season: e.season_number, number: e.episode_number, title: e.name })); }
+  return out;
+}
+async function checkMeta(q = {}) {
+  const type = q.type === "series" ? "series" : "movie";
+  if (q.ids && q.ids.tmdb) return metaByTmdb(type, q.ids.tmdb);
+  if (q.ids && q.ids.imdb) { const f = await tmdbGet(`/find/${q.ids.imdb}`, { external_source: "imdb_id" }); const hit = f && ((type === "series" ? f.tv_results : f.movie_results) || [])[0]; return hit ? metaByTmdb(type, hit.id) : null; }
+  if (q.title) { const s = await tmdbGet(`/search/${type === "series" ? "tv" : "movie"}`, { query: q.title }); const hit = s && s.results && s.results[0]; return hit ? metaByTmdb(type, hit.id) : null; }
+  return null;
+}
+
+/** true: the site has it; false: it does not; null: could not tell. One check at a time (the plugin reads the global kino). */
+async function hasIt(card) {
+  let listed = 0;
+  const recorded = () => { throw Object.assign(new Error("snapshot: recorded"), { code: "provider_failed" }); };
+  const plugins = { call: async (alias, call) => { if (call === "normalizeHost") return { host: "" }; if (call === "resolve") listed++; return recorded(); }, callAll: async () => [], providers: async () => [] };
+  // A kino of its own: the kit gives each one a request allowance per minute.
+  globalThis.kino = { ...createKino(manifest, { lang: "es-CO", device: "phone" }).kino, meta: checkMeta, plugins, browser: undefined };
+  const late = (ms) => new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("late"), { code: "timeout" })), ms));
+  try {
+    let ref = card.ref;
+    if (card.kind === "series") {
+      const eps = await Promise.race([plugin.episodes(card.ref), late(20000)]);
+      const list = Array.isArray(eps) ? eps : (eps && eps.episodes) || [];
+      const ep = list.find((e) => e && e.ref);
+      if (!ep) return false;
+      ref = ep.ref;
+    }
+    await Promise.race([plugin.resolve(ref), late(25000)]);
+    return true; // it resolved (a stream of the site's own), or at least listed a server before the recorder refused it
+  } catch (e) {
+    if (listed > 0) return true;
+    return e && e.code === "not_found" ? false : null;
+  } finally { globalThis.kino = kino; }
+}
+
+if (CHECK && tmdb) {
+  const budget = Number(process.env.SNAPSHOT_CHECKS || 60);
+  // The cards nobody knows about yet, the first of every row before the second of any.
+  const todo = []; const queued = new Set();
+  for (let pos = 0; pos < 60; pos++) for (const t of source.tabs) for (const r of live[t.id] || []) {
+    const c = r.items[pos];
+    if (c && c.ref && !r.hidden && !queued.has(c.ref) && !freshOf(c.ref)) { queued.add(c.ref); todo.push(c); }
+  }
+  let learned = 0, missing = 0;
+  for (const c of todo.slice(0, budget)) {
+    const ok = await hasIt(c);
+    if (ok === null) continue;
+    known[c.ref] = { ok, at: Date.now() };
+    learned++; if (!ok) missing++;
+  }
+  // Forget what no row shows any more, so the file does not grow for ever.
+  const shownRefs = new Set(); for (const t of source.tabs) for (const r of live[t.id] || []) for (const c of r.items) shownRefs.add(c.ref);
+  for (const ref of Object.keys(known)) if (!shownRefs.has(ref) && Date.now() - Number(known[ref].at) > 14 * DAY) delete known[ref];
+  if (learned) writeFileSync(availFile, JSON.stringify({ v: 1, items: known }) + "\n");
+  let dropped = 0;
+  for (const t of source.tabs) {
+    if (!live[t.id]) continue;
+    live[t.id] = live[t.id].map((r) => {
+      if (r.hidden) return r;
+      const items = r.items.filter((c) => { const k = freshOf(c.ref); return !(k && k.ok === false); });
+      dropped += r.items.length - items.length;
+      return { ...r, items };
+    }).filter((r) => r.hidden || r.items.length >= 3); // a rail of one or two cards is not worth its place
+  }
+  console.log(`only what plays: ${learned} cards checked (${missing} not on the site, ${Math.max(0, todo.length - budget)} left for the next run), ${dropped} cards left out`);
+}
+
 /** The Home: its own rows, then the other tabs' rows it lacks (by title), until it has MIN_ROWS. */
 function richHome(rows) {
   const out = rows.filter((r) => !r.hidden); // every row of its own: more than MIN_ROWS is welcome (owner, 2026-11-23)
