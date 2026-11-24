@@ -403,3 +403,57 @@ const HOME_PATHS = {
   "g-action": "/discover/movie", "g-comedy": "/discover/movie", "g-scifi": "/discover/movie", "g-horror": "/discover/movie",
   "g-drama": "/discover/movie", kids: "/discover/movie", docs: "/discover/movie", anime: "/discover/tv",
 };
+
+// ---- anime rows (owner, 2026-11-24): tagged "anime" so Kino's «Anime» shelf takes them, and only what plays ----
+
+const AVAILABLE = "https://raw.githubusercontent.com/xuper-plugin/kino-plugin-embed69/main/home/available.json";
+const availableFile = (items) => ({ body: JSON.stringify({ v: 1, items }) });
+
+test("the anime rows carry Kino's anime tag and ask TMDB for Japanese animation: airing this week, popular, films", async () => {
+  tmdbImpl = async () => ({ results: titles(5) });
+  const ok = Object.fromEntries([1000, 1001, 1002].flatMap((id) => [["m:" + id, { ok: true, at: 1 }], ["s:" + id, { ok: true, at: 1 }]]));
+  pages = { [AVAILABLE]: availableFile(ok) };
+  const rows = await plugin.home();
+  const anime = rows.filter((r) => r.genre === "anime");
+  assert.deepEqual(anime.map((r) => r.id), ["anime-new", "anime", "anime-movies"]);
+  const asked = (ref) => tmdbCalls.find((c) => c.path === (ref === "anime-movies" ? "/discover/movie" : "/discover/tv") && c.params.with_genres === 16 && c.params.with_original_language === "ja" && (ref === "anime-new") === ("air_date.gte" in c.params));
+  for (const id of ["anime-new", "anime", "anime-movies"]) assert.ok(asked(id), id);
+  const fresh = tmdbCalls.find((c) => "air_date.gte" in c.params).params;
+  assert.match(fresh["air_date.gte"], /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(fresh["air_date.gte"] < fresh["air_date.lte"]);
+  assert.equal(fresh.sort_by, "popularity.desc");
+  assert.equal(anime.find((r) => r.id === "anime-movies").items[0].kind, "movie");
+  assert.equal(anime.find((r) => r.id === "anime").items[0].kind, "series");
+});
+
+test("an anime row shows only titles known to play; the other rows drop only the known misses", async () => {
+  tmdbImpl = async () => ({ results: titles(5) });
+  pages = { [AVAILABLE]: availableFile({ "s:1000": { ok: true, at: 1 }, "s:1001": { ok: false, at: 1 }, "m:1002": { ok: false, at: 1 } }) };
+  const rows = await plugin.home();
+  const anime = rows.find((r) => r.id === "anime");
+  assert.deepEqual(anime.items.map((i) => i.ref), ["s:1000"]); // 1002..1004 not checked yet: left out of the anime row
+  assert.ok(!rows.some((r) => r.id === "anime-movies"), "no anime film known to play: no row");
+  const trending = rows.find((r) => r.id === "trending-movies");
+  assert.deepEqual(trending.items.map((i) => i.ref), ["m:1000", "m:1001", "m:1003", "m:1004"]); // only the known miss left out
+  // An anime title is in its anime row only, so Kino files it as anime and not as a plain series.
+  assert.ok(!rows.find((r) => r.id === "trending-series").items.some((i) => i.ref === "s:1000"));
+});
+
+test("without the availability file the anime rows stay out and the rest are shown", async () => {
+  tmdbImpl = async () => ({ results: titles(5) });
+  const rows = await plugin.home();
+  assert.ok(!rows.some((r) => r.genre === "anime"));
+  assert.ok(rows.length >= 10);
+});
+
+test("the anime rows open their own lists in Ver más", async () => {
+  tmdbImpl = async (path, params) => ({ results: titles(30), page: params.page, total_pages: 3 });
+  for (const [ref, path, fresh] of [["anime:new", "/discover/tv", true], ["anime:tv", "/discover/tv", false], ["anime:movie", "/discover/movie", false]]) {
+    tmdbCalls.length = 0;
+    const first = await plugin.browse(ref, null);
+    assert.ok(first.items.length > 0 && first.next === "2", ref);
+    assert.equal(tmdbCalls[0].path, path, ref);
+    assert.equal(tmdbCalls[0].params.with_original_language, "ja", ref);
+    assert.equal("air_date.gte" in tmdbCalls[0].params, fresh, ref);
+  }
+});

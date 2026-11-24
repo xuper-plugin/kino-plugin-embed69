@@ -12,6 +12,8 @@ const ROOT = new URL("../", import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("kino-plugin.json", ROOT), "utf8"));
 const { kino } = createKino(manifest, { lang: "es-CO", device: "phone" });
 globalThis.kino = kino;
+// The plugin's home() leaves out what home/available.json says does not play; the snapshot must see the raw lists to check them.
+globalThis.__kinoHomeSnapshot = true;
 
 const plugin = await import(new URL("src/plugin.js", ROOT).href);
 const std = await import(new URL("src/std/index.js", ROOT).href);
@@ -78,6 +80,9 @@ const CHECK = process.env.SNAPSHOT_CHECK === "1" && typeof plugin.resolve === "f
 const availFile = new URL("home/available.json", ROOT);
 const known = (() => { try { return JSON.parse(readFileSync(availFile, "utf8")).items || {}; } catch (_) { return {}; } })();
 const DAY = 24 * 60 * 60 * 1000;
+// Rows whose genre is listed here (the plugin's STRICT_GENRES: anime) show only cards known to play, and are checked first.
+const STRICT = new Set(Array.isArray(plugin.STRICT_GENRES) ? plugin.STRICT_GENRES : []);
+const strictRow = (r) => STRICT.has(r.genre);
 const freshOf = (ref) => { const k = known[ref]; return k && Date.now() - Number(k.at) < (k.ok ? 14 : 3) * DAY ? k : null; };
 
 /** kino.meta for the checks, answered by TMDB with the snapshot's key (the kit's own answers only fixtures). */
@@ -139,10 +144,11 @@ async function hasIt(card) {
 if (CHECK && tmdb) {
   const budget = Number(process.env.SNAPSHOT_CHECKS || 60);
   // The cards nobody knows about yet, the first of every row before the second of any.
+  // The strict rows' cards (anime) go first: those rows show nothing that was not checked.
   const todo = []; const queued = new Set();
-  for (let pos = 0; pos < 60; pos++) for (const t of source.tabs) for (const r of live[t.id] || []) {
+  for (const pass of [true, false]) for (let pos = 0; pos < 60; pos++) for (const t of source.tabs) for (const r of live[t.id] || []) {
     const c = r.items[pos];
-    if (c && c.ref && !r.hidden && !queued.has(c.ref) && !freshOf(c.ref)) { queued.add(c.ref); todo.push(c); }
+    if (strictRow(r) === pass && c && c.ref && !r.hidden && !queued.has(c.ref) && !freshOf(c.ref)) { queued.add(c.ref); todo.push(c); }
   }
   let learned = 0, missing = 0;
   for (const c of todo.slice(0, budget)) {
@@ -160,7 +166,7 @@ if (CHECK && tmdb) {
     if (!live[t.id]) continue;
     live[t.id] = live[t.id].map((r) => {
       if (r.hidden) return r;
-      const items = r.items.filter((c) => { const k = freshOf(c.ref); return !(k && k.ok === false); });
+      const items = r.items.filter((c) => { const k = freshOf(c.ref); return strictRow(r) ? !!(k && k.ok) : !(k && k.ok === false); });
       dropped += r.items.length - items.length;
       return { ...r, items };
     }).filter((r) => r.hidden || r.items.length >= 3); // a rail of one or two cards is not worth its place

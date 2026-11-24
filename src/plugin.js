@@ -52,7 +52,9 @@ const STRINGS = {
     topSeries: "Series mejor valoradas",
     kids: "Para los niños",
     docs: "Documentales",
-    anime: "Anime",
+    anime: "Anime popular",
+    animeNew: "Anime: nuevos episodios",
+    animeMovies: "Películas de anime",
     gAction: "Acción",
     gComedy: "Comedia",
     gSciFi: "Ciencia ficción",
@@ -78,7 +80,9 @@ const STRINGS = {
     topSeries: "Top rated series",
     kids: "For kids",
     docs: "Documentaries",
-    anime: "Anime",
+    anime: "Popular anime",
+    animeNew: "Anime: new episodes",
+    animeMovies: "Anime movies",
     gAction: "Action",
     gComedy: "Comedy",
     gSciFi: "Science fiction",
@@ -154,10 +158,15 @@ const titlesOf = (query) => [query.q, query.originalTitle, ...(query.altTitles |
  */
 const HOME_ROWS = [
   { id: "trending-movies", title: "trendingMovies", genre: "peliculas", ref: "trend:movie", kind: "movie", path: "/trending/movie/week" },
+  { id: "trending-series", title: "trendingSeries", genre: "series", ref: "trend:tv", kind: "tv", path: "/trending/tv/week" },
+  // Anime (owner, 2026-11-24): what is airing now first, then the popular series and the films. TMDB has no anime flag:
+  // Japanese-language animation is what these rows mean. They come early so Kino's per-plugin Home quota reaches them.
+  { id: "anime-new", title: "animeNew", genre: "anime", ref: "anime:new", kind: "tv", path: "/discover/tv", params: () => animeNewParams() },
+  { id: "anime", title: "anime", genre: "anime", ref: "anime:tv", kind: "tv", path: "/discover/tv", params: () => ANIME },
+  { id: "anime-movies", title: "animeMovies", genre: "anime", ref: "anime:movie", kind: "movie", path: "/discover/movie", params: () => ANIME },
   { id: "now-playing", title: "nowPlaying", genre: "peliculas", ref: "list:movie:now_playing", kind: "movie", path: "/movie/now_playing" },
   { id: "upcoming", title: "upcoming", genre: "peliculas", ref: "list:movie:upcoming", kind: "movie", path: "/movie/upcoming" },
   { id: "top-movies", title: "topMovies", genre: "peliculas", ref: "list:movie:top_rated", kind: "movie", path: "/movie/top_rated" },
-  { id: "trending-series", title: "trendingSeries", genre: "series", ref: "trend:tv", kind: "tv", path: "/trending/tv/week" },
   { id: "on-the-air", title: "onTheAir", genre: "series", ref: "list:tv:on_the_air", kind: "tv", path: "/tv/on_the_air" },
   { id: "top-series", title: "topSeries", genre: "series", ref: "list:tv:top_rated", kind: "tv", path: "/tv/top_rated" },
   { id: "g-action", title: "gAction", genre: "peliculas", ref: "genre:movie:28", kind: "movie", path: "/discover/movie", params: { with_genres: 28 } },
@@ -167,14 +176,25 @@ const HOME_ROWS = [
   { id: "g-drama", title: "gDrama", genre: "peliculas", ref: "genre:movie:18", kind: "movie", path: "/discover/movie", params: { with_genres: 18 } },
   { id: "kids", title: "kids", genre: "infantil", ref: "genre:movie:10751", kind: "movie", path: "/discover/movie", params: { with_genres: 10751 } },
   { id: "docs", title: "docs", genre: "documentales", ref: "genre:movie:99", kind: "movie", path: "/discover/movie", params: { with_genres: 99 } },
-  { id: "anime", title: "anime", genre: "anime", ref: "anime:tv", kind: "tv", path: "/discover/tv", params: { with_genres: 16, with_origin_country: "JP" } },
 ];
 
 // A discover list sorted by popularity is full of titles nobody has voted on: ask for some votes.
 const DISCOVER = { sort_by: "popularity.desc", "vote_count.gte": 200 };
+/** Japanese-language animation: TMDB's genre 16 + original language ja (TMDB has no anime flag). */
+const ANIME = { with_genres: 16, with_original_language: "ja" };
+const ANIME_NEW_DAYS = 7;
+/**
+ * Anime with an episode out in the last week, the most watched first. The dates move once a day, so Kino's 3-hour cache of
+ * a discover list keeps serving the same answer within the day. Few votes are asked: a new season has had little time.
+ */
+export function animeNewParams(now = Date.now()) {
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  return { ...ANIME, "air_date.gte": day(now - ANIME_NEW_DAYS * DAY_MS), "air_date.lte": day(now), "vote_count.gte": 10 };
+}
 
 async function homeRow(row) {
-  const res = await tmdb(row.path, { ...(row.path.startsWith("/discover") ? DISCOVER : {}), ...(row.params || {}) });
+  const params = typeof row.params === "function" ? row.params() : row.params || {};
+  const res = await tmdb(row.path, { ...(row.path.startsWith("/discover") ? DISCOVER : {}), ...params });
   // a row of posters: what has none looks broken
   const items = (res?.results || []).filter((r) => r.poster_path).slice(0, 20).map((r) => itemFromTmdb(r, row.kind));
   return items.length ? { id: row.id, title: t(row.title), genre: row.genre, ref: row.ref, items } : null;
@@ -183,7 +203,7 @@ async function homeRow(row) {
 /** Kino cuts a Home at 20 s: the rows still loading by then are left off and the ones that loaded are shown. */
 const HOME_BUDGET_MS = 14000;
 
-/** The rows of the browse screen's Películas and Series tabs: the Home rows of that kind (anime goes with Series). */
+/** The rows of the browse screen's Películas and Series tabs: the Home rows of that kind (anime series with Series, anime films with Películas). */
 const TAB_ROWS = {
   peliculas: HOME_ROWS.filter((r) => r.kind === "movie"),
   series: HOME_ROWS.filter((r) => r.kind === "tv"),
@@ -197,12 +217,59 @@ export async function home() {
 async function rowsWithin(defs) {
   const out = defs.map(() => null);
   let done = false;
-  const all = Promise.all(defs.map((row, i) => homeRow(row).then((r) => { out[i] = r; }, () => {}))).then(() => { done = true; });
+  let known = null;
+  const knownAsked = availability().then((k) => { known = k; }, () => {});
+  const all = Promise.all([...defs.map((row, i) => homeRow(row).then((r) => { out[i] = r; }, () => {})), knownAsked]).then(() => { done = true; });
   const end = Date.now() + HOME_BUDGET_MS;
   while (!done && Date.now() < end) await Promise.race([all, kino.sleep(Math.min(250, Math.max(1, end - Date.now())))]);
-  const rows = out.filter(Boolean);
+  const rows = onlyWhatPlays(out.filter(Boolean), known);
   if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t("unavailable") });
   return rows;
+}
+
+// ---- only what plays ----
+// The Home rows are TMDB lists, and embed69.org does not have every title. The repository's Home snapshot
+// (scripts/home-snapshot.mjs, every 6 hours) asks the plugin's own resolve for each card and keeps what it learned in
+// home/available.json ({ v, items: { "<ref>": { ok, at } } }). One small request, kept 3 hours; the last good copy serves 7 days.
+
+const AVAILABLE_URL = "https://raw.githubusercontent.com/xuper-plugin/kino-plugin-embed69/main/home/available.json";
+const AVAILABLE_KEY = "home:available";
+const AVAILABLE_FRESH_MS = 3 * 60 * 60 * 1000;
+const AVAILABLE_KEEP_MS = 7 * DAY_MS;
+const AVAILABLE_TIMEOUT_MS = 6000;
+/** The rows that show only titles known to play: a title not checked yet stays out (the other rows drop only known misses). */
+export const STRICT_GENRES = ["anime"];
+
+/** The refs known to play (`yes`) and known missing (`no`), or null when no copy of the file can be had. */
+async function availability() {
+  let stored = null;
+  try { stored = JSON.parse(kino.storage.get(AVAILABLE_KEY) || "null"); } catch (_) { stored = null; }
+  if (stored && Date.now() - Number(stored.at) < AVAILABLE_FRESH_MS) return knownSets(stored);
+  try {
+    if (typeof kino.fetch !== "function") throw new Error("no fetch");
+    const r = await kino.fetch(AVAILABLE_URL, { timeoutMs: AVAILABLE_TIMEOUT_MS });
+    const items = r && r.ok ? (JSON.parse(await r.text()) || {}).items : null;
+    if (!items || typeof items !== "object") throw new Error("no items");
+    const yes = [], no = [];
+    for (const [ref, k] of Object.entries(items)) if (k && typeof k.ok === "boolean") (k.ok ? yes : no).push(ref);
+    stored = { at: Date.now(), yes, no };
+    try { kino.storage.set(AVAILABLE_KEY, JSON.stringify(stored), { ttlMs: AVAILABLE_KEEP_MS }); } catch (_) { /* storage full */ }
+  } catch (_) { /* the last good copy, if any */ }
+  return stored ? knownSets(stored) : null;
+}
+const knownSets = (o) => ({ yes: new Set(o.yes || []), no: new Set(o.no || []) });
+
+/**
+ * [rows] without what is known not to play: a strict row (anime) keeps only the titles known to play, the others drop the
+ * known misses. A title of a strict row is shown there only, so Kino files it as anime and not as a plain series (the first
+ * row that brings a title decides its type). The snapshot script sets `__kinoHomeSnapshot` to see the raw lists it checks.
+ */
+export function onlyWhatPlays(rows, known) {
+  if (globalThis.__kinoHomeSnapshot) return rows;
+  const strict = (r) => STRICT_GENRES.includes(r.genre);
+  const kept = rows.map((r) => ({ ...r, items: r.items.filter((i) => (strict(r) ? !!known && known.yes.has(i.ref) : !(known && known.no.has(i.ref)))) }));
+  const special = new Set(kept.filter(strict).flatMap((r) => r.items.map((i) => i.ref)));
+  return kept.map((r) => (strict(r) ? r : { ...r, items: r.items.filter((i) => !special.has(i.ref)) })).filter((r) => r.items.length > 0);
 }
 
 // ---- search ----
@@ -265,11 +332,11 @@ export async function browse(ref, cursor) {
   } else if (parts[0] === "popular" && (parts[1] === "movie" || parts[1] === "tv")) {
     kind = parts[1];
     path = `/${kind}/popular`;
-  } else if (parts[0] === "anime" && parts[1] === "tv") {
-    // Japanese animation: TMDB has no anime flag, but animation from Japan is what the Home row means
-    kind = "tv";
-    path = "/discover/tv";
-    params = { ...DISCOVER, with_genres: 16, with_origin_country: "JP", page };
+  } else if (parts[0] === "anime" && (parts[1] === "tv" || parts[1] === "movie" || parts[1] === "new")) {
+    // Japanese-language animation: TMDB has no anime flag, but that is what the Home rows mean ("new": airing this week)
+    kind = parts[1] === "movie" ? "movie" : "tv";
+    path = "/discover/" + kind;
+    params = { ...DISCOVER, ...(parts[1] === "new" ? animeNewParams() : ANIME), page };
   } else if (parts[0] === "genre" && (parts[1] === "movie" || parts[1] === "tv") && /^\d+$/.test(parts[2] || "")) {
     kind = parts[1];
     path = `/discover/${kind}`;

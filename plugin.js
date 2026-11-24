@@ -972,7 +972,9 @@ var STRINGS = {
     topSeries: "Series mejor valoradas",
     kids: "Para los ni\xF1os",
     docs: "Documentales",
-    anime: "Anime",
+    anime: "Anime popular",
+    animeNew: "Anime: nuevos episodios",
+    animeMovies: "Pel\xEDculas de anime",
     gAction: "Acci\xF3n",
     gComedy: "Comedia",
     gSciFi: "Ciencia ficci\xF3n",
@@ -998,7 +1000,9 @@ var STRINGS = {
     topSeries: "Top rated series",
     kids: "For kids",
     docs: "Documentaries",
-    anime: "Anime",
+    anime: "Popular anime",
+    animeNew: "Anime: new episodes",
+    animeMovies: "Anime movies",
     gAction: "Action",
     gComedy: "Comedy",
     gSciFi: "Science fiction",
@@ -1073,10 +1077,15 @@ async function imdbFor(tmdbId, type) {
 var titlesOf = (query) => [query.q, query.originalTitle, ...query.altTitles || []].filter(Boolean);
 var HOME_ROWS = [
   { id: "trending-movies", title: "trendingMovies", genre: "peliculas", ref: "trend:movie", kind: "movie", path: "/trending/movie/week" },
+  { id: "trending-series", title: "trendingSeries", genre: "series", ref: "trend:tv", kind: "tv", path: "/trending/tv/week" },
+  // Anime (owner, 2026-11-24): what is airing now first, then the popular series and the films. TMDB has no anime flag:
+  // Japanese-language animation is what these rows mean. They come early so Kino's per-plugin Home quota reaches them.
+  { id: "anime-new", title: "animeNew", genre: "anime", ref: "anime:new", kind: "tv", path: "/discover/tv", params: () => animeNewParams() },
+  { id: "anime", title: "anime", genre: "anime", ref: "anime:tv", kind: "tv", path: "/discover/tv", params: () => ANIME },
+  { id: "anime-movies", title: "animeMovies", genre: "anime", ref: "anime:movie", kind: "movie", path: "/discover/movie", params: () => ANIME },
   { id: "now-playing", title: "nowPlaying", genre: "peliculas", ref: "list:movie:now_playing", kind: "movie", path: "/movie/now_playing" },
   { id: "upcoming", title: "upcoming", genre: "peliculas", ref: "list:movie:upcoming", kind: "movie", path: "/movie/upcoming" },
   { id: "top-movies", title: "topMovies", genre: "peliculas", ref: "list:movie:top_rated", kind: "movie", path: "/movie/top_rated" },
-  { id: "trending-series", title: "trendingSeries", genre: "series", ref: "trend:tv", kind: "tv", path: "/trending/tv/week" },
   { id: "on-the-air", title: "onTheAir", genre: "series", ref: "list:tv:on_the_air", kind: "tv", path: "/tv/on_the_air" },
   { id: "top-series", title: "topSeries", genre: "series", ref: "list:tv:top_rated", kind: "tv", path: "/tv/top_rated" },
   { id: "g-action", title: "gAction", genre: "peliculas", ref: "genre:movie:28", kind: "movie", path: "/discover/movie", params: { with_genres: 28 } },
@@ -1085,12 +1094,18 @@ var HOME_ROWS = [
   { id: "g-horror", title: "gHorror", genre: "peliculas", ref: "genre:movie:27", kind: "movie", path: "/discover/movie", params: { with_genres: 27 } },
   { id: "g-drama", title: "gDrama", genre: "peliculas", ref: "genre:movie:18", kind: "movie", path: "/discover/movie", params: { with_genres: 18 } },
   { id: "kids", title: "kids", genre: "infantil", ref: "genre:movie:10751", kind: "movie", path: "/discover/movie", params: { with_genres: 10751 } },
-  { id: "docs", title: "docs", genre: "documentales", ref: "genre:movie:99", kind: "movie", path: "/discover/movie", params: { with_genres: 99 } },
-  { id: "anime", title: "anime", genre: "anime", ref: "anime:tv", kind: "tv", path: "/discover/tv", params: { with_genres: 16, with_origin_country: "JP" } }
+  { id: "docs", title: "docs", genre: "documentales", ref: "genre:movie:99", kind: "movie", path: "/discover/movie", params: { with_genres: 99 } }
 ];
 var DISCOVER = { sort_by: "popularity.desc", "vote_count.gte": 200 };
+var ANIME = { with_genres: 16, with_original_language: "ja" };
+var ANIME_NEW_DAYS = 7;
+function animeNewParams(now = Date.now()) {
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  return { ...ANIME, "air_date.gte": day(now - ANIME_NEW_DAYS * DAY_MS), "air_date.lte": day(now), "vote_count.gte": 10 };
+}
 async function homeRow(row) {
-  const res = await tmdb(row.path, { ...row.path.startsWith("/discover") ? DISCOVER : {}, ...row.params || {} });
+  const params = typeof row.params === "function" ? row.params() : row.params || {};
+  const res = await tmdb(row.path, { ...row.path.startsWith("/discover") ? DISCOVER : {}, ...params });
   const items = (res?.results || []).filter((r) => r.poster_path).slice(0, 20).map((r) => itemFromTmdb(r, row.kind));
   return items.length ? { id: row.id, title: t(row.title), genre: row.genre, ref: row.ref, items } : null;
 }
@@ -1105,17 +1120,60 @@ async function home() {
 async function rowsWithin(defs) {
   const out = defs.map(() => null);
   let done = false;
-  const all = Promise.all(defs.map((row, i) => homeRow(row).then((r) => {
+  let known = null;
+  const knownAsked = availability().then((k) => {
+    known = k;
+  }, () => {
+  });
+  const all = Promise.all([...defs.map((row, i) => homeRow(row).then((r) => {
     out[i] = r;
   }, () => {
-  }))).then(() => {
+  })), knownAsked]).then(() => {
     done = true;
   });
   const end = Date.now() + HOME_BUDGET_MS;
   while (!done && Date.now() < end) await Promise.race([all, kino.sleep(Math.min(250, Math.max(1, end - Date.now())))]);
-  const rows = out.filter(Boolean);
+  const rows = onlyWhatPlays(out.filter(Boolean), known);
   if (!rows.length) throw kino.error("unavailable", "no home row could be loaded", { userMessage: t("unavailable") });
   return rows;
+}
+var AVAILABLE_URL = "https://raw.githubusercontent.com/xuper-plugin/kino-plugin-embed69/main/home/available.json";
+var AVAILABLE_KEY = "home:available";
+var AVAILABLE_FRESH_MS = 3 * 60 * 60 * 1e3;
+var AVAILABLE_KEEP_MS = 7 * DAY_MS;
+var AVAILABLE_TIMEOUT_MS = 6e3;
+var STRICT_GENRES = ["anime"];
+async function availability() {
+  let stored = null;
+  try {
+    stored = JSON.parse(kino.storage.get(AVAILABLE_KEY) || "null");
+  } catch (_) {
+    stored = null;
+  }
+  if (stored && Date.now() - Number(stored.at) < AVAILABLE_FRESH_MS) return knownSets(stored);
+  try {
+    if (typeof kino.fetch !== "function") throw new Error("no fetch");
+    const r = await kino.fetch(AVAILABLE_URL, { timeoutMs: AVAILABLE_TIMEOUT_MS });
+    const items = r && r.ok ? (JSON.parse(await r.text()) || {}).items : null;
+    if (!items || typeof items !== "object") throw new Error("no items");
+    const yes = [], no = [];
+    for (const [ref, k] of Object.entries(items)) if (k && typeof k.ok === "boolean") (k.ok ? yes : no).push(ref);
+    stored = { at: Date.now(), yes, no };
+    try {
+      kino.storage.set(AVAILABLE_KEY, JSON.stringify(stored), { ttlMs: AVAILABLE_KEEP_MS });
+    } catch (_) {
+    }
+  } catch (_) {
+  }
+  return stored ? knownSets(stored) : null;
+}
+var knownSets = (o) => ({ yes: new Set(o.yes || []), no: new Set(o.no || []) });
+function onlyWhatPlays(rows, known) {
+  if (globalThis.__kinoHomeSnapshot) return rows;
+  const strict = (r) => STRICT_GENRES.includes(r.genre);
+  const kept = rows.map((r) => ({ ...r, items: r.items.filter((i) => strict(r) ? !!known && known.yes.has(i.ref) : !(known && known.no.has(i.ref))) }));
+  const special = new Set(kept.filter(strict).flatMap((r) => r.items.map((i) => i.ref)));
+  return kept.map((r) => strict(r) ? r : { ...r, items: r.items.filter((i) => !special.has(i.ref)) }).filter((r) => r.items.length > 0);
 }
 var SEARCH_CHECK_CAP = 18;
 async function availableOnly(items, req) {
@@ -1168,10 +1226,10 @@ async function browse(ref, cursor) {
   } else if (parts[0] === "popular" && (parts[1] === "movie" || parts[1] === "tv")) {
     kind = parts[1];
     path = `/${kind}/popular`;
-  } else if (parts[0] === "anime" && parts[1] === "tv") {
-    kind = "tv";
-    path = "/discover/tv";
-    params = { ...DISCOVER, with_genres: 16, with_origin_country: "JP", page };
+  } else if (parts[0] === "anime" && (parts[1] === "tv" || parts[1] === "movie" || parts[1] === "new")) {
+    kind = parts[1] === "movie" ? "movie" : "tv";
+    path = "/discover/" + kind;
+    params = { ...DISCOVER, ...parts[1] === "new" ? animeNewParams() : ANIME, page };
   } else if (parts[0] === "genre" && (parts[1] === "movie" || parts[1] === "tv") && /^\d+$/.test(parts[2] || "")) {
     kind = parts[1];
     path = `/discover/${kind}`;
@@ -1466,11 +1524,14 @@ async function action(key) {
 }
 var proto_catalog_search = catalogDoor(search);
 export {
+  STRICT_GENRES,
   action,
+  animeNewParams,
   browse,
   categories,
   episodes,
   home,
+  onlyWhatPlays,
   proto_catalog_search,
   resolve,
   screen,
