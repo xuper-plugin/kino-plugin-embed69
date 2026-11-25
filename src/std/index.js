@@ -1,4 +1,4 @@
-// std 1.8.1 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
+// std 1.10.0 — the standard screen of the xuper-plugin site plugins (golden copy: C:\dev\xuper-plugin\_standard\src\std).
 // Copy this folder as it is into a plugin's src/std/; a change goes to the golden copy first, then to every plugin.
 //
 // It paints at once from what is kept, then fills each tab as the source answers:
@@ -43,7 +43,8 @@ const DEFAULT_TABS = [{ id: "inicio", label: "Inicio", labelEn: "Home" }];
  * `needsResolver`: the plugin cannot play without kino-resolver installed (the screen is then its install gate while it is
  * missing). `hasSettings`: the manifest declares `settings`. `tabs`: `[{ id, label, labelEn }]`. `loadTab(tabId)` → `{ rows }`.
  * `homeKey`: the kino.storage key where the plugin's home() keeps `{ rows }`, to seed the first tab (optional).
- * `page` (std 1.7.0, Da-Video): `{ open: async (ev) => statePatch, view: (ctx) => nodes, events: { name: async (ev) => answer } }`:
+ * `page` (std 1.7.0, Da-Video): `{ open: async (ev) => statePatch, view: (ctx) => nodes, events: { name: async (ev) => answer } }`
+ * (std 1.9.0: `actions: (ctx) => nodes`, its own bar buttons, drawn before the settings gear):
  * the plugin's own body under the standard bar instead of tabs of title rails (no tab loading); `every?: (ctx) => { ms, event } | null`
  * runs a timer of its own while it answers one.
  * `searchHere` (std 1.7.0, Da-Video): `{ sources: async () => [{ repo, name }], searchIn: async (q, repos) => [{ repo, name, ok,
@@ -206,7 +207,8 @@ export function makeStandardScreen({ kino, name, nameEn, logo = null, logoAspect
     const pending = Array.isArray(st.pending) && st.pending.length > 0;
     const searching = st.searching === true;
     if (page) {
-      const tree = browseView(cfg, { tab: TAB_IDS[0], data: null, recent: [], pending: false, failed: false, searching, device, own: page.view({ ...c, state: st }) || [] });
+      const tree = browseView(cfg, { tab: TAB_IDS[0], data: null, recent: [], pending: false, failed: false, searching, device, own: page.view({ ...c, state: st }) || [],
+        ownActions: page.actions ? page.actions({ ...c, state: st }) || [] : [] });
       // The page may run its own timer (e.g. while a long job of its own runs): { ms, event }, one of its own events.
       const every = page.every ? page.every({ ...c, state: st }) : null;
       return every ? { ...tree, every } : tree;

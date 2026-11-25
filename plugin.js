@@ -338,13 +338,15 @@ var rail = (r, key, words, headers) => ({
   items: r.items,
   ...withHeaders(headers)
 });
-function browseView(cfg, { tab, data, recent, pending, failed, searching = false, device = "phone", own = null }) {
+function browseView(cfg, { tab, data, recent, pending, failed, searching = false, device = "phone", own = null, ownActions = [] }) {
   const tv = device === "tv";
   const tabs = own ? [cfg.tabs[0]] : cfg.tabs;
   const active = tabs.some((t2) => t2.id === tab) ? tab : tabs[0].id;
   const withTabs = tabs.length > 1;
   const body = [];
-  if (own) {
+  const ownBlocks = own && !Array.isArray(own) && Array.isArray(own.blocks) ? own.blocks : null;
+  if (ownBlocks) {
+  } else if (own) {
     body.push(...own);
   } else if (data) {
     const h = cfg.imageHeaders;
@@ -383,6 +385,8 @@ function browseView(cfg, { tab, data, recent, pending, failed, searching = false
     actions: [
       // barSearch: false (std 1.7.0): the plugin draws its own search field in its page instead of the bar's icon.
       ...cfg.barSearch ? [iconButton("searchButton", "search", "search", { ui: searchOpenOps(tabsInBar), event: "searchOpened" })] : [],
+      // std 1.9.0: the page's own bar buttons (page.actions), before the settings gear.
+      ...Array.isArray(ownActions) ? ownActions : [],
       iconButton("settingsButton", "settings", "settings", "openSettings")
     ]
   });
@@ -392,7 +396,7 @@ function browseView(cfg, { tab, data, recent, pending, failed, searching = false
     appBar,
     body: { type: "Column", key: "page", children: [
       ...withTabs && !tv ? [{ type: "Column", key: "tabsRow", padding: { compact: 0, expanded: 24 }, children: [tabBar(tabs, active)] }] : [],
-      { type: "SingleChildScrollView", key: "browse-" + active, flex: 1, children: [...banner ? [banner] : [], { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] }
+      { type: "SingleChildScrollView", key: "browse-" + active, flex: 1, children: ownBlocks ? ownBlocks.filter((b) => b && Array.isArray(b.nodes) && b.nodes.length).flatMap((b, i) => b.edge ? b.nodes : [{ type: "Column", key: "block-" + i, padding: { compact: 12, expanded: 24 }, gap: 16, crossAxisAlignment: "stretch", children: b.nodes }]) : [...banner ? [banner] : [], { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] }
     ] },
     ...pending ? { every: { ms: POLL_MS, event: "tick" } } : {}
   };
@@ -733,7 +737,17 @@ function makeStandardScreen({ kino: kino2, name, nameEn, logo = null, logoAspect
     const pending = Array.isArray(st.pending) && st.pending.length > 0;
     const searching = st.searching === true;
     if (page) {
-      const tree = browseView(cfg, { tab: TAB_IDS[0], data: null, recent: [], pending: false, failed: false, searching, device, own: page.view({ ...c, state: st }) || [] });
+      const tree = browseView(cfg, {
+        tab: TAB_IDS[0],
+        data: null,
+        recent: [],
+        pending: false,
+        failed: false,
+        searching,
+        device,
+        own: page.view({ ...c, state: st }) || [],
+        ownActions: page.actions ? page.actions({ ...c, state: st }) || [] : []
+      });
       const every = page.every ? page.every({ ...c, state: st }) : null;
       return every ? { ...tree, every } : tree;
     }
@@ -913,6 +927,7 @@ var LOGO_ASPECT = "1:1";
 
 // src/std/catalog.js
 var CATALOG_MAX = 40;
+var CATALOG_EPISODES_MAX = 500;
 var OVERVIEW_MAX2 = 300;
 var HTTPS3 = /^https:\/\//;
 function catalogItems(found) {
@@ -935,13 +950,42 @@ function catalogItems(found) {
 function catalogQuery(arg) {
   const q = String(arg && arg.q || "").trim().slice(0, 200);
   const type = arg && (arg.type === "movie" || arg.type === "series") ? arg.type : "any";
-  return { q, type, season: 0, episode: 0, tmdbId: 0, year: 0, originalTitle: "", altTitles: [], cursor: null };
+  const tmdbId = arg && Number.isInteger(arg.tmdb) && arg.tmdb > 0 ? arg.tmdb : 0;
+  return { q, type, season: 0, episode: 0, tmdbId, year: 0, originalTitle: "", altTitles: [], cursor: null };
 }
 function catalogDoor(search2) {
   return async (arg) => {
     const query = catalogQuery(arg);
     if (!query.q) return [];
     return catalogItems(await search2(query));
+  };
+}
+function wholeNumber(v) {
+  if (Number.isInteger(v)) return v;
+  if (typeof v === "string" && /^\s*\d+\s*$/.test(v)) return parseInt(v, 10);
+  return null;
+}
+function catalogEpisodes(list) {
+  const rows = Array.isArray(list) ? list : list && Array.isArray(list.episodes) ? list.episodes : [];
+  const out = [];
+  for (const e of rows) {
+    if (out.length >= CATALOG_EPISODES_MAX) break;
+    if (!e) continue;
+    const number = wholeNumber(e.number);
+    if (number === null || number < 1 || typeof e.ref !== "string" || !e.ref) continue;
+    const season = e.season === void 0 || e.season === null ? 1 : wholeNumber(e.season);
+    if (season === null || season < 0) continue;
+    const row = { season, number, ref: e.ref };
+    if (typeof e.title === "string" && e.title) row.title = e.title;
+    out.push(row);
+  }
+  return out;
+}
+function catalogEpisodesDoor(episodes2) {
+  return async (arg) => {
+    const ref = arg && typeof arg.ref === "string" ? arg.ref.trim() : "";
+    if (!ref) return [];
+    return catalogEpisodes(await episodes2(ref));
   };
 }
 
@@ -1523,6 +1567,7 @@ async function action(key) {
   }
 }
 var proto_catalog_search = catalogDoor(search);
+var proto_catalog_episodes = catalogEpisodesDoor(episodes);
 export {
   STRICT_GENRES,
   action,
@@ -1532,6 +1577,7 @@ export {
   episodes,
   home,
   onlyWhatPlays,
+  proto_catalog_episodes,
   proto_catalog_search,
   resolve,
   screen,

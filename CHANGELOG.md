@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1
+
+- The catalog door also lists a series' episodes, for the author's other plugins (std 1.10.0)
+
 ## 1.7.0
 
 - Anime on the Home: three rows tagged as anime, so Kino's «Anime» shelf fills: new episodes (Japanese animation with an episode out this week), popular anime series and anime films

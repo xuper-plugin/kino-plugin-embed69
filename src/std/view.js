@@ -95,14 +95,19 @@ const rail = (r, key, words, headers) => ({
  * titles. `pending`: some tab is still being fetched (the timer polls only then). `failed`: the active tab could not load.
  * `searching`: the search box is open (Back then closes it: the Scaffold declares `onBack`).
  */
-export function browseView(cfg, { tab, data, recent, pending, failed, searching = false, device = "phone", own = null }) {
+export function browseView(cfg, { tab, data, recent, pending, failed, searching = false, device = "phone", own = null, ownActions = [] }) {
   const tv = device === "tv";
   // `own` (std's `page`): the plugin's own body nodes in place of the tabs and their rails.
   const tabs = own ? [cfg.tabs[0]] : cfg.tabs;
   const active = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
   const withTabs = tabs.length > 1;
   const body = [];
-  if (own) {
+  // std 1.9.1: the page may hand blocks, `{ blocks: [{ edge, nodes }] }`: an `edge` block runs edge to edge (a slider), the others
+  // sit in the padded column, in order. A plain array is one padded block, as before.
+  const ownBlocks = own && !Array.isArray(own) && Array.isArray(own.blocks) ? own.blocks : null;
+  if (ownBlocks) {
+    /* drawn below, block by block */
+  } else if (own) {
     body.push(...own);
   } else if (data) {
     const h = cfg.imageHeaders;
@@ -136,6 +141,8 @@ export function browseView(cfg, { tab, data, recent, pending, failed, searching 
     actions: [
       // barSearch: false (std 1.7.0): the plugin draws its own search field in its page instead of the bar's icon.
       ...(cfg.barSearch ? [iconButton("searchButton", "search", "search", { ui: searchOpenOps(tabsInBar), event: "searchOpened" })] : []),
+      // std 1.9.0: the page's own bar buttons (page.actions), before the settings gear.
+      ...(Array.isArray(ownActions) ? ownActions : []),
       iconButton("settingsButton", "settings", "settings", "openSettings"),
     ],
   });
@@ -145,7 +152,10 @@ export function browseView(cfg, { tab, data, recent, pending, failed, searching 
     appBar,
     body: { type: "Column", key: "page", children: [
       ...(withTabs && !tv ? [{ type: "Column", key: "tabsRow", padding: { compact: 0, expanded: 24 }, children: [tabBar(tabs, active)] }] : []),
-      { type: "SingleChildScrollView", key: "browse-" + active, flex: 1, children: [...(banner ? [banner] : []), { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] },
+      { type: "SingleChildScrollView", key: "browse-" + active, flex: 1, children: ownBlocks
+        ? ownBlocks.filter((b) => b && Array.isArray(b.nodes) && b.nodes.length).flatMap((b, i) => (b.edge ? b.nodes
+          : [{ type: "Column", key: "block-" + i, padding: { compact: 12, expanded: 24 }, gap: 16, crossAxisAlignment: "stretch", children: b.nodes }]))
+        : [...(banner ? [banner] : []), { type: "Column", padding: { compact: 12, expanded: 24 }, gap: 16, children: body }] },
     ] },
     ...(pending ? { every: { ms: POLL_MS, event: "tick" } } : {}),
   };
